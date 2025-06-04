@@ -68,3 +68,10 @@ This table includes models that produce slide-level or patient-level embeddings 
 | [TITAN](https://arxiv.org/abs/2411.19666)<sub>V</sub> (VL)          | [Mahmood Lab](https://faisal.ai)                                                                               | :white_check_mark: | Dec 2024[\*](https://arxiv.org/abs/2411.19666v1)                 | iBOT                                  | **340K**                     |          | 1024       | 91K (270 epochs) | ViT (smaller)            | 42M        |           | 224        | Mass-340K (proprietary)                                                        | [<img src="https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.x/svgs/brands/github.svg" width="20">](https://github.com/mahmoodlab/TITAN) [<img src="https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo.svg" width="25">](https://huggingface.co/MahmoodLab/TITAN)                       |
 | [THREADS](https://arxiv.org/abs/2501.16652) (WSI, RNA, DNA)         | [Mahmood Lab](https://faisal.ai)                                                                               | :x:                | Jan 2025[\*](https://arxiv.org/abs/2501.16652v1)                 |                                       | 47K                          |          | 1200       | up to 101 epochs | ViT-L                    |            |           | 224        | MBTG-47k (MGH, BWH, TCGA, GTEx)                                                |                                                                                                                                                                                                                                                                                                                               |
  
+
+
+## Modern results
+| Name  | Link | Augmentations |
+| ------------- | ------------- | - |
+| Content Cell  | Content Cell  |   |
+| Content Cell  | Content Cell  |    |
