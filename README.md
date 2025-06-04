@@ -71,7 +71,7 @@ This table includes models that produce slide-level or patient-level embeddings 
 
 
 ## Modern results
-| Name  | Link | Augmentations |
-| ------------- | ------------- | - |
-| Content Cell  | Content Cell  |   |
-| Content Cell  | Content Cell  |    |
+| Name  | Link | Augmentations |Dataset|
+| ------------- | ------------- |-----------|----------|
+| UNI  |https://pmc.ncbi.nlm.nih.gov/articles/PMC11403354/pdf/nihms-2015612.pdf | To augment the data, we use the large-scale jittering (LSJ) augmentation135, with a random scale sampled from a range of 0.5–2.0, followed by a fixed size crop to 896 × 896pixels to accommodate the size constraints of CTransPath. At inference time, we resize the image dimensions to their nearest multiples of 224.  |Private|
+| Virchow  | https://www.nature.com/articles/s41591-024-03141-0   |  Nothing  | Private |
