@@ -40,7 +40,6 @@ class TestVisionDataset(ExtendedVisionDataset):
         #The transform used is a torchvision StandardTransform.
         #This means that it takes as input two things, and runs two different transforms on both.
         if self.transforms is not None:
-            print(type(self.transforms))
             return self.transforms(image, None)
 
         #this just returns a class index, which we do not need.
