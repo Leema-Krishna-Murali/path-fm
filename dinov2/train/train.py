@@ -308,8 +308,7 @@ def main(args):
         model_pretrained = model_pretrained.to(torch.device("cuda"))
         model.student.backbone.patch_embed.proj = model_pretrained.patch_embed.proj
 
-        #For layer...
-        #need to merge with the pretrained layers. However, pretrained layers can be iterated cleanly - this can't.
+        #For each block, copy weights over.
         layers = []
         for layer in model_pretrained.blocks:
             layers.append(layer)
@@ -327,7 +326,7 @@ def main(args):
                     sublayer.mlp.fc2.weight = current.mlp.fc2.weight
 
         model.student.backbone.norm.weight = model_pretrained.norm.weight
-
+        #What do we do about the teacher?
 
     model.prepare_for_distributed_training()
 
