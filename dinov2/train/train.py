@@ -304,12 +304,30 @@ def main(args):
         pass
     if "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
         print("load small")
+        model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
+        model_pretrained = model_pretrained.to(torch.device("cuda"))
+        model.student.backbone.patch_embed.proj = model_pretrained.patch_embed.proj
 
-    print(model)
-    model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
-    #model = torch.hub.load("./models/hub/facebookresearch_dinov2_main/", "dinov2_vits14_reg", source = "local")
-    print(model)
-    exit()
+        #For layer...
+        #need to merge with the pretrained layers. However, pretrained layers can be iterated cleanly - this can't.
+        layers = []
+        for layer in model_pretrained.blocks:
+            layers.append(layer)
+        i = 0
+        for layer in model.student.backbone.blocks:
+            for sublayer in layer:
+                if type(sublayer) != torch.nn.Identity:
+                    #So we have the subblock, now we need to convert
+                    current = layers.pop(0)
+                    sublayer.norm1.weight = current.norm1.weight
+                    sublayer.attn.qkv.weight = current.attn.qkv.weight
+                    sublayer.attn.proj.weight = current.attn.proj.weight
+                    sublayer.norm2.weight = current.norm2.weight
+                    sublayer.mlp.fc1.weight = current.mlp.fc1.weight
+                    sublayer.mlp.fc2.weight = current.mlp.fc2.weight
+
+        model.student.backbone.norm.weight = model_pretrained.norm.weight
+
 
     model.prepare_for_distributed_training()
 
