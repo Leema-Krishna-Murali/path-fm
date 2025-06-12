@@ -191,6 +191,7 @@ def do_train(cfg, model, resume=False):
 
     # setup data loader
 
+    print("dataset path is", cfg.train.dataset_path)#This is the imagenet string shit
     dataset = make_dataset(
         dataset_str=cfg.train.dataset_path,
         transform=data_transform,
@@ -298,6 +299,18 @@ def main(args):
     cfg = setup(args)
 
     model = SSLMetaArch(cfg).to(torch.device("cuda"))
+    #Load model here from pretrained.
+    if "\'arch\': \'vit_large\'" in str(cfg):#Temporary check
+        pass
+    if "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
+        print("load small")
+
+    print(model)
+    model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
+    #model = torch.hub.load("./models/hub/facebookresearch_dinov2_main/", "dinov2_vits14_reg", source = "local")
+    print(model)
+    exit()
+
     model.prepare_for_distributed_training()
 
     logger.info("Model:\n{}".format(model))
