@@ -300,9 +300,7 @@ def main(args):
 
     model = SSLMetaArch(cfg).to(torch.device("cuda"))
     #Load model here from pretrained.
-    if "\'arch\': \'vit_large\'" in str(cfg):#Temporary check
-        pass
-    if "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
+    if cfg.train.use_pretrained and "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
         print("load small")
         model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
         model_pretrained = model_pretrained.to(torch.device("cuda"))
