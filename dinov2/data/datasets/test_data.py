@@ -32,14 +32,14 @@ class TestVisionDataset(ExtendedVisionDataset):
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         try:
             path = self.image_files[index]
-            print("debugging, found this path", path)
-            image = Image.open(path)
+            image = Image.open(path).convert("RGB")
         except Exception as e:
             raise RuntimeError(f"can not read image for sample {index}") from e
         
         #The transform used is a torchvision StandardTransform.
         #This means that it takes as input two things, and runs two different transforms on both.
         if self.transforms is not None:
+            print(image.size, path)#Debug only
             return self.transforms(image, None)
 
         #this just returns a class index, which we do not need.
