@@ -11,9 +11,32 @@ from .transforms import (
     GaussianBlur,
     make_normalize_transform,
 )
+from skimage.color import rgb2hed, hed2rgb
 
+import torch
 
 logger = logging.getLogger("dinov2")
+
+class hed_mod(torch.nn.Module):
+
+    def forward(self, img, label):
+
+        if img !=None:
+            #Convert image from RGB to HED.
+            hed_image = rgb2hed(img)
+            #Modify channels
+            hed_image[..., 0] += 0.0#H
+            hed_image[..., 1] += 0.0#E
+            hed_image[..., 2] += 0.0#D
+            img = hed2rgb(img)
+        if label != None:
+            hed_image = rgb2hed(label)
+            #Modify channels
+            hed_image[..., 0] += 0.0#H
+            hed_image[..., 1] += 0.0#E
+            hed_image[..., 2] += 0.0#D
+        return img, label
+
 
 
 class DataAugmentationDINO(object):
@@ -89,7 +112,9 @@ class DataAugmentationDINO(object):
             ]
         )
 
-        self.global_transfo1 = transforms.Compose([color_jittering, global_transfo1_extra, self.normalize])
+        hed = hed_mod()
+
+        self.global_transfo1 = transforms.Compose([color_jittering, global_transfo1_extra, self.normalize, hed])#Do we apply to everything?
         self.global_transfo2 = transforms.Compose([color_jittering, global_transfo2_extra, self.normalize])
         self.local_transfo = transforms.Compose([color_jittering, local_transfo_extra, self.normalize])
 
