@@ -1,5 +1,7 @@
 torch
 torchvision
+openslide-bin
+openslide-python
 omegaconf
 torchmetrics
 fvcore
