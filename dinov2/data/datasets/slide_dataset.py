@@ -91,7 +91,8 @@ class SlideDataset(ExtendedVisionDataset):
         
         tile = np.array(tile_rgb)
         tile = cv2.cvtColor(tile, cv2.COLOR_RGB2HSV)
-
+        min_ratio = .6
+        
         lower_bound = np.array([90, 8, 103])
         upper_bound = np.array([180, 255, 255])
 
