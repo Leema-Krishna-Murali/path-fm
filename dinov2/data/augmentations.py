@@ -15,26 +15,30 @@ from skimage.color import rgb2hed, hed2rgb
 
 import torch
 
+import random
 logger = logging.getLogger("dinov2")
 
 class hed_mod(torch.nn.Module):
 
     def forward(self, img, label):
-
+        
         if img !=None:
             #Convert image from RGB to HED.
             hed_image = rgb2hed(img)
-            #Modify channels
-            hed_image[..., 0] += 0.0#H
-            hed_image[..., 1] += 0.0#E
-            hed_image[..., 2] += 0.0#D
+            #Modify channels, each with random amount, between -.05 and .05
+            mini = -.05
+            maxi = .05
+            total = maxi - mini
+            hed_image[..., 0] += random.uniform(0, total) - maxi#H
+            hed_image[..., 1] += random.uniform(0, total) - maxi#E
+            hed_image[..., 2] += random.uniform(0, total) - maxi#D
             img = hed2rgb(img)
         if label != None:
             hed_image = rgb2hed(label)
             #Modify channels
-            hed_image[..., 0] += 0.0#H
-            hed_image[..., 1] += 0.0#E
-            hed_image[..., 2] += 0.0#D
+            hed_image[..., 0] += random.uniform(0, total) - maxi#H
+            hed_image[..., 1] += random.uniform(0, total) - maxi#E
+            hed_image[..., 2] += random.uniform(0, total) - maxi#D
         return img, label
 
 
