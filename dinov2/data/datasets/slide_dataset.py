@@ -33,8 +33,6 @@ class SlideDataset(ExtendedVisionDataset):
         try:
             path = self.image_files[index]
             image = OpenSlide(path)
-            print("found image")
-            print(image)
             image_levels = image.level_count
             print("This many image levels", image_levels)
             print("This dim", image.level_dimensions)#((49933, 41465), (12483, 10366), (3120, 2591))
@@ -48,8 +46,12 @@ class SlideDataset(ExtendedVisionDataset):
             width = image.level_dimensions[level][0]
             
             print("starting hsv loop")
-            for i in range(0, 5):
-                print(i)
+            i = 0
+            while True:
+                i = i + 1
+                if i == 100:
+                    print("Couldn't find matching item in slide", path)
+                    exit()
                 x = random.randint(0, width - patch_size)
                 y = random.randint(0, height - patch_size)
                 patch = image.read_region((x, y), level=0, size=(patch_size, patch_size))
@@ -61,30 +63,15 @@ class SlideDataset(ExtendedVisionDataset):
                     pass
                 else:
                     break
-            #Grab the patch, filter by HSV
-            #if it fails, try again...
-            print("done")
-            exit() 
-
-            
-            #image = Image.open(path).convert("RGB")
         except Exception as e:
             raise RuntimeError(f"can not read image for sample {index}") from e
         
         #The transform used is a torchvision StandardTransform.
         #This means that it takes as input two things, and runs two different transforms on both.
         if self.transforms is not None:
-            print(image.size, path)#Debug only
-            return self.transforms(image, None)
+            return self.transforms(res, None)
 
-        #this just returns a class index, which we do not need.
-#        target = self.get_target(index)
-#        target = TargetDecoder(target).decode()
-
-        #if self.transforms is not None:
-        #    image, target = self.transforms(image, target)
-
-        return image, None
+        return res, None
         
     def hsv(self, tile_rgb, patch_size):
     
@@ -100,12 +87,12 @@ class SlideDataset(ExtendedVisionDataset):
 
         ratio = np.count_nonzero(mask) / mask.size
         if ratio > min_ratio:
-            print("accept this")
-            tile_rgb.show()
+            #print("accept this")
+            #tile_rgb.show()
             return tile_rgb
         else:
-            print("reject")
-            tile_rgb.show()
+            #print("reject")
+            #tile_rgb.show()
             return None
 
     def __len__(self) -> int:
