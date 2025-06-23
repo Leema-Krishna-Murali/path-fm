@@ -3,6 +3,7 @@ dino:
   head_bottleneck_dim: 384
   do_kde: True
   kde_loss_weight: .1
+  koleo_loss_weight: 0
   do_koleo: False
 ibot:
   separate_head: true
