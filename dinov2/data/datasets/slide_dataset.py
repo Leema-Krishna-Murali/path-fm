@@ -34,20 +34,21 @@ class SlideDataset(ExtendedVisionDataset):
             path = self.image_files[index]
             image = OpenSlide(path)
             image_levels = image.level_count
-            print("This many image levels", image_levels)
-            print("This dim", image.level_dimensions)#((49933, 41465), (12483, 10366), (3120, 2591))
+            #print("This many image levels", image_levels)
+            #print("This dim", image.level_dimensions)#((49933, 41465), (12483, 10366), (3120, 2591))
 
-            for key, value in image.properties.items():
-                print(f"{key}: {value}")
+            #for key, value in image.properties.items():
+            #    print(f"{key}: {value}")
             #Decide on a magnification. For testing purposes, it'll be always level 0
             level = 0
             patch_size = 224
             height = image.level_dimensions[level][1]
             width = image.level_dimensions[level][0]
             
-            print("starting hsv loop")
+            #print("starting hsv loop")
             i = 0
             while True:
+                print(i)
                 i = i + 1
                 if i == 100:
                     print("Couldn't find matching item in slide", path)
