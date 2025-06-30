@@ -203,6 +203,7 @@ def do_train(cfg, model, resume=False):
         dataset=dataset,
         batch_size=cfg.train.batch_size_per_gpu,
         num_workers=cfg.train.num_workers,
+#        num_workers = 0,
         shuffle=True,
         seed=start_iter,  # TODO: Fix this -- cfg.train.seed
         sampler_type=sampler_type,
@@ -220,6 +221,7 @@ def do_train(cfg, model, resume=False):
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
 
+    
     for data in metric_logger.log_every(
         data_loader,
         10,
@@ -304,7 +306,7 @@ def main(args):
         print("load small")
         model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
         model_pretrained = model_pretrained.to(torch.device("cuda"))
-        model.student.backbone.patch_embed.proj = model_pretrained.patch_embed.proj
+        model.student.backbone.patch_embed.proj.weight = model_pretrained.patch_embed.proj.weight
 
         #For each block, copy weights over.
         layers = []
@@ -324,7 +326,6 @@ def main(args):
                     sublayer.mlp.fc2.weight = current.mlp.fc2.weight
 
         model.student.backbone.norm.weight = model_pretrained.norm.weight
-        #What do we do about the teacher?
 
     model.prepare_for_distributed_training()
 

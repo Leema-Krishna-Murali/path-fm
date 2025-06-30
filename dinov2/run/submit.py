@@ -106,7 +106,7 @@ def submit_jobs(task_class, args, name: str):
 
     executor_params = get_slurm_executor_parameters(
         nodes=args.nodes,
-        num_gpus_per_node=args.ngpus,
+        num_gpus_per_node=1,
         timeout_min=args.timeout,  # max is 60 * 72
         slurm_signal_delay_s=120,
         slurm_partition=args.partition,

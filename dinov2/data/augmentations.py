@@ -19,6 +19,8 @@ import random
 import matplotlib.pyplot as plt
 logger = logging.getLogger("dinov2")
 
+import torchvision
+
 class hed_mod(torch.nn.Module):
 
     def forward(self, img, label = None):
@@ -27,6 +29,8 @@ class hed_mod(torch.nn.Module):
             #Convert image from RGB to HED.
             #Input shape is (3,size, size)
             #Convert to chanels last, then swap back
+            img = torchvision.transforms.functional.pil_to_tensor(img)
+
             img = rearrange(img, 'c h w -> h w c')
             img_orig = img
             hed_image = rgb2hed(img)
@@ -34,13 +38,15 @@ class hed_mod(torch.nn.Module):
             mini = -.05
             maxi = .05
             total = maxi - mini
-        
-#            hed_image[..., 0] *= (1 + random.uniform(0, total) - maxi)#H
-#            hed_image[..., 1] *= (1 + random.uniform(0, total) - maxi)#E
-#            hed_image[..., 2] *= (1 + random.uniform(0, total) - maxi)#D
-            hed_image[..., 0] += random.uniform(0, total) - maxi#H
-            hed_image[..., 1] += random.uniform(0, total) - maxi#E
-            hed_image[..., 2] += random.uniform(0, total) - maxi#D
+            
+            if False:
+                hed_image[..., 0] *= (1 + random.uniform(0, total) - maxi)#H
+                hed_image[..., 1] *= (1 + random.uniform(0, total) - maxi)#E
+                hed_image[..., 2] *= (1 + random.uniform(0, total) - maxi)#D
+            else:
+                hed_image[..., 0] += random.uniform(0, total) - maxi#H
+                hed_image[..., 1] += random.uniform(0, total) - maxi#E
+                hed_image[..., 2] += random.uniform(0, total) - maxi#D
            
             img = hed2rgb(hed_image)
 
@@ -62,9 +68,11 @@ class hed_mod(torch.nn.Module):
                 fig.suptitle("Image Comparison: Before and After HED Channel Modification", y=1.02) # y adjusts title position
 
                 plt.show()
-
+                
+                exit()
             img = rearrange(img, 'h w c -> c h w')
             img = torch.from_numpy(img)
+            img = torchvision.transforms.functional.to_pil_image(img)
         
         if label != None:
             label = rearrange(label, 'c h w -> h w c')
@@ -157,9 +165,9 @@ class DataAugmentationDINO(object):
 
         hed = hed_mod()
 
-        self.global_transfo1 = transforms.Compose([color_jittering, global_transfo1_extra, self.normalize, hed])#Do we apply to everything?
+        self.global_transfo1 = transforms.Compose([color_jittering, global_transfo1_extra, self.normalize])#Do we apply to everything?
         self.global_transfo2 = transforms.Compose([color_jittering, global_transfo2_extra, self.normalize])
-        self.local_transfo = transforms.Compose([color_jittering, local_transfo_extra, self.normalize])
+        self.local_transfo = transforms.Compose([hed, color_jittering, local_transfo_extra, self.normalize])
 
     def __call__(self, image):
         output = {}

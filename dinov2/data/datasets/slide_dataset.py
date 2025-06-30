@@ -50,7 +50,7 @@ class SlideDataset(ExtendedVisionDataset):
             while True:
                 print(i)
                 i = i + 1
-                if i == 100:
+                if i == 10000:
                     print("Couldn't find matching item in slide", path)
                     exit()
                 x = random.randint(0, width - patch_size)
@@ -65,13 +65,14 @@ class SlideDataset(ExtendedVisionDataset):
                 else:
                     break
         except Exception as e:
+            print("Crash")
             raise RuntimeError(f"can not read image for sample {index}") from e
         
         #The transform used is a torchvision StandardTransform.
         #This means that it takes as input two things, and runs two different transforms on both.
         if self.transforms is not None:
             return self.transforms(res, None)
-
+        print("returning patch")
         return res, None
         
     def hsv(self, tile_rgb, patch_size):
