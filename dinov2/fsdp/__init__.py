@@ -65,7 +65,7 @@ def is_sharded_fsdp(x):
 def free_if_fsdp(x):
     if is_sharded_fsdp(x):
         handle = x._handle
-        _reshard(x, handles, True)
+        _reshard(x, handle, True)
 
 
 def get_fsdp_modules(x):

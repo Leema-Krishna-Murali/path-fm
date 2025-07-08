@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import submitit
-
+import torch
 from dinov2.utils.cluster import (
     get_slurm_executor_parameters,
     get_slurm_partition,
@@ -104,9 +104,12 @@ def submit_jobs(task_class, args, name: str):
     if args.exclude:
         kwargs["slurm_exclude"] = args.exclude
 
+    print("Submitting stuff")
     executor_params = get_slurm_executor_parameters(
         nodes=args.nodes,
-        num_gpus_per_node=1,
+        #num_gpus_per_node=args.ngpus,
+        #num_gpus_per_node=2,
+        num_gpus_per_node=torch.cuda.device_count(),
         timeout_min=args.timeout,  # max is 60 * 72
         slurm_signal_delay_s=120,
         slurm_partition=args.partition,

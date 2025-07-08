@@ -11,83 +11,9 @@ from .transforms import (
     GaussianBlur,
     make_normalize_transform,
 )
-from skimage.color import rgb2hed, hed2rgb
 
-import torch
-from einops import rearrange, reduce, repeat
-import random
-import matplotlib.pyplot as plt
+
 logger = logging.getLogger("dinov2")
-
-import torchvision
-
-class hed_mod(torch.nn.Module):
-
-    def forward(self, img, label = None):
-        
-        if img !=None:
-            #Convert image from RGB to HED.
-            #Input shape is (3,size, size)
-            #Convert to chanels last, then swap back
-            img = torchvision.transforms.functional.pil_to_tensor(img)
-
-            img = rearrange(img, 'c h w -> h w c')
-            img_orig = img
-            hed_image = rgb2hed(img)
-            #Modify channels, each with random amount, between -.05 and .05
-            mini = -.05
-            maxi = .05
-            total = maxi - mini
-            
-            if False:
-                hed_image[..., 0] *= (1 + random.uniform(0, total) - maxi)#H
-                hed_image[..., 1] *= (1 + random.uniform(0, total) - maxi)#E
-                hed_image[..., 2] *= (1 + random.uniform(0, total) - maxi)#D
-            else:
-                hed_image[..., 0] += random.uniform(0, total) - maxi#H
-                hed_image[..., 1] += random.uniform(0, total) - maxi#E
-                hed_image[..., 2] += random.uniform(0, total) - maxi#D
-           
-            img = hed2rgb(hed_image)
-
-            if False:#debug
-                fig, axes = plt.subplots(1, 2, figsize=(10, 5)) # Adjust figsize as needed
-                axes[0].imshow(img_orig)
-                axes[0].set_title("Before")
-                axes[0].axis('off') # Turn off axis ticks and labels for cleaner image display
-
-                # Plot the "After" image on the second subplot
-                axes[1].imshow(img)
-                axes[1].set_title("After")
-                axes[1].axis('off') # Turn off axis ticks and labels
-
-                # Adjust layout to prevent titles from overlapping
-                plt.tight_layout()
-
-                # Set the overall figure title (optional)
-                fig.suptitle("Image Comparison: Before and After HED Channel Modification", y=1.02) # y adjusts title position
-
-                plt.show()
-                
-                exit()
-            img = rearrange(img, 'h w c -> c h w')
-            img = torch.from_numpy(img)
-            img = torchvision.transforms.functional.to_pil_image(img)
-        
-        if label != None:
-            label = rearrange(label, 'c h w -> h w c')
-            hed_image = rgb2hed(label)
-            #Modify channels
-            hed_image[..., 0] += random.uniform(0, total) - maxi#H
-            hed_image[..., 1] += random.uniform(0, total) - maxi#E
-            hed_image[..., 2] += random.uniform(0, total) - maxi#D
-            label = rearrange(label, 'h w c -> c h w')
-            label = torch.from_numpy(label)
-
-            return img, label 
-
-        return img
-
 
 
 class DataAugmentationDINO(object):
@@ -149,7 +75,7 @@ class DataAugmentationDINO(object):
         global_transfo2_extra = transforms.Compose(
             [
                 GaussianBlur(p=0.1),
-                #transforms.RandomSolarize(threshold=128, p=0.2),
+                transforms.RandomSolarize(threshold=128, p=0.2),
             ]
         )
 
@@ -163,11 +89,9 @@ class DataAugmentationDINO(object):
             ]
         )
 
-        hed = hed_mod()
-
-        self.global_transfo1 = transforms.Compose([color_jittering, global_transfo1_extra, self.normalize])#Do we apply to everything?
+        self.global_transfo1 = transforms.Compose([color_jittering, global_transfo1_extra, self.normalize])
         self.global_transfo2 = transforms.Compose([color_jittering, global_transfo2_extra, self.normalize])
-        self.local_transfo = transforms.Compose([hed, color_jittering, local_transfo_extra, self.normalize])
+        self.local_transfo = transforms.Compose([color_jittering, local_transfo_extra, self.normalize])
 
     def __call__(self, image):
         output = {}

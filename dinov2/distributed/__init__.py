@@ -166,6 +166,7 @@ class _TorchDistributedEnvironment:
             pass
         elif len(env_vars) == len(_TORCH_DISTRIBUTED_ENV_VARS):
             # Environment is fully set
+            print("Using pretrained env")
             return self._set_from_preset_env()
         else:
             # Environment is partially set
@@ -173,6 +174,7 @@ class _TorchDistributedEnvironment:
             raise RuntimeError(f"Partially set environment: {collected_env_vars}")
 
         if torch.cuda.device_count() > 0:
+            print("using lcoal env")
             return self._set_from_local()
 
         raise RuntimeError("Can't initialize PyTorch distributed environment")

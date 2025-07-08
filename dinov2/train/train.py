@@ -26,6 +26,7 @@ from dinov2.train.ssl_meta_arch import SSLMetaArch
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
 logger = logging.getLogger("dinov2")
 
+import wandb
 
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("DINOv2 training", add_help=add_help)
@@ -54,7 +55,7 @@ For python-based LazyConfig, use "path.key=value".
         type=str,
         help="Output directory to save logs and checkpoints",
     )
-
+    parser.add_argument("--local-rank", default=0, type=int, help="Variable for distributed computing.") 
     return parser
 
 
@@ -146,6 +147,13 @@ def do_train(cfg, model, resume=False):
         teacher_temp_schedule,
         last_layer_lr_schedule,
     ) = build_schedulers(cfg)
+    
+    from omegaconf import OmegaConf
+    if distributed.is_main_process():
+        run = wandb.init(
+            project="midnight-rep",  # Specify your project
+            config = OmegaConf.to_container(cfg)
+        )
 
     # checkpointer
     checkpointer = FSDPCheckpointer(model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True)
@@ -191,7 +199,6 @@ def do_train(cfg, model, resume=False):
 
     # setup data loader
 
-    print("dataset path is", cfg.train.dataset_path)#This is the imagenet string shit
     dataset = make_dataset(
         dataset_str=cfg.train.dataset_path,
         transform=data_transform,
@@ -203,7 +210,6 @@ def do_train(cfg, model, resume=False):
         dataset=dataset,
         batch_size=cfg.train.batch_size_per_gpu,
         num_workers=cfg.train.num_workers,
-#        num_workers = 0,
         shuffle=True,
         seed=start_iter,  # TODO: Fix this -- cfg.train.seed
         sampler_type=sampler_type,
@@ -221,7 +227,6 @@ def do_train(cfg, model, resume=False):
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
 
-    
     for data in metric_logger.log_every(
         data_loader,
         10,
@@ -284,6 +289,14 @@ def do_train(cfg, model, resume=False):
         metric_logger.update(last_layer_lr=last_layer_lr)
         metric_logger.update(current_batch_size=current_batch_size)
         metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
+        if distributed.is_main_process():
+            wandb.log({"Learning Rate":lr,
+                        "Momentum": mom,
+                        "Last Layer LR": last_layer_lr,
+                        "Learning Rate":lr,
+                        "Total Loss":losses_reduced
+                })
+            wandb.log(loss_dict)
 
         # checkpointing and testing
 
@@ -301,32 +314,7 @@ def main(args):
     cfg = setup(args)
 
     model = SSLMetaArch(cfg).to(torch.device("cuda"))
-    #Load model here from pretrained.
-    if cfg.train.use_pretrained and "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
-        print("load small")
-        model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
-        model_pretrained = model_pretrained.to(torch.device("cuda"))
-        model.student.backbone.patch_embed.proj.weight = model_pretrained.patch_embed.proj.weight
-
-        #For each block, copy weights over.
-        layers = []
-        for layer in model_pretrained.blocks:
-            layers.append(layer)
-        i = 0
-        for layer in model.student.backbone.blocks:
-            for sublayer in layer:
-                if type(sublayer) != torch.nn.Identity:
-                    #So we have the subblock, now we need to convert
-                    current = layers.pop(0)
-                    sublayer.norm1.weight = current.norm1.weight
-                    sublayer.attn.qkv.weight = current.attn.qkv.weight
-                    sublayer.attn.proj.weight = current.attn.proj.weight
-                    sublayer.norm2.weight = current.norm2.weight
-                    sublayer.mlp.fc1.weight = current.mlp.fc1.weight
-                    sublayer.mlp.fc2.weight = current.mlp.fc2.weight
-
-        model.student.backbone.norm.weight = model_pretrained.norm.weight
-
+    print(model)
     model.prepare_for_distributed_training()
 
     logger.info("Model:\n{}".format(model))

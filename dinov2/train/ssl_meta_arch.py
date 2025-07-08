@@ -9,7 +9,7 @@ import logging
 import torch
 from torch import nn
 
-from dinov2.loss import DINOLoss, iBOTPatchLoss, KoLeoLoss, KDELoss
+from dinov2.loss import DINOLoss, iBOTPatchLoss, KoLeoLoss
 from dinov2.models import build_model_from_cfg
 from dinov2.layers import DINOHead
 from dinov2.utils.utils import has_batchnorms
@@ -52,7 +52,6 @@ class SSLMetaArch(nn.Module):
 
         self.do_dino = cfg.dino.loss_weight > 0
         self.do_koleo = cfg.dino.koleo_loss_weight > 0
-        self.do_kde = cfg.dino.kde_loss_weight > 0
         self.do_ibot = cfg.ibot.loss_weight > 0
         self.ibot_separate_head = cfg.ibot.separate_head
 
@@ -75,9 +74,6 @@ class SSLMetaArch(nn.Module):
             if self.do_koleo:
                 logger.info("OPTIONS -- DINO -- applying KOLEO regularization")
                 self.koleo_loss = KoLeoLoss()
-            if self.do_kde:
-                logger.info("OPTIONS -- DINO -- apply KDE regularization")
-                self.kde_loss = KDELoss()
 
         else:
             logger.info("OPTIONS -- DINO -- not using DINO")
@@ -315,7 +311,6 @@ class SSLMetaArch(nn.Module):
             student_cls_tokens = student_global_cls_tokens
 
             if self.do_koleo:
-                print("doing koleo")
                 koleo_loss = self.cfg.dino.koleo_loss_weight * sum(
                     self.koleo_loss(p) for p in student_cls_tokens.chunk(2)
                 )  # we don't apply koleo loss between cls tokens of a same image
@@ -323,16 +318,6 @@ class SSLMetaArch(nn.Module):
                 loss_dict["koleo_loss"] = (
                     koleo_loss / loss_scales
                 )  # this is to display the same losses as before but we can remove eventually
-                print(self.cfg.dino.kolea_loss_weight)
-            if self.do_kde:
-                kde_loss = self.cfg.dino.kde_loss_weight * sum(
-                    self.kde_loss(p) for p in student_cls_tokens.chunk(2)
-                )  # we don't apply koleo loss between cls tokens of a same image
-                loss_accumulator += kde_loss
-                loss_dict["kde_loss"] = (
-                    kde_loss / loss_scales
-                )  # this is to display the same losses as before but we can remove eventually
-
 
         if do_ibot:
             # compute loss
