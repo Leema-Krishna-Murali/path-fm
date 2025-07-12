@@ -40,10 +40,10 @@ class SlideDataset(ExtendedVisionDataset):
             #for key, value in image.properties.items():
             #    print(f"{key}: {value}")
             #Decide on a magnification. For testing purposes, it'll be always level 0
-            level = 0
+            level = random.randomint(0, image_levels - 1)
             patch_size = 224
-            height = image.level_dimensions[level][1]
-            width = image.level_dimensions[level][0]
+            height = image.level_dimensions[0][1]
+            width = image.level_dimensions[0][0]
             
             #print("starting hsv loop")
             i = 0

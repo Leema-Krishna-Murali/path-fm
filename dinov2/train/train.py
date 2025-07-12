@@ -25,7 +25,7 @@ from dinov2.train.ssl_meta_arch import SSLMetaArch
 
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
 logger = logging.getLogger("dinov2")
-
+import wandb
 
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("DINOv2 training", add_help=add_help)
@@ -146,6 +146,15 @@ def do_train(cfg, model, resume=False):
         teacher_temp_schedule,
         last_layer_lr_schedule,
     ) = build_schedulers(cfg)
+    
+    from omegaconf import OmegaConf
+    if distributed.is_main_process():
+        run = wandb.init(
+            project="midnight-rep",  # Specify your project
+            config = OmegaConf.to_container(cfg)
+        )
+
+
 
     # checkpointer
     checkpointer = FSDPCheckpointer(model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True)
@@ -202,8 +211,8 @@ def do_train(cfg, model, resume=False):
     data_loader = make_data_loader(
         dataset=dataset,
         batch_size=cfg.train.batch_size_per_gpu,
-        num_workers=cfg.train.num_workers,
-#        num_workers = 0,
+        #        num_workers=cfg.train.num_workers,
+        num_workers = 1,
         shuffle=True,
         seed=start_iter,  # TODO: Fix this -- cfg.train.seed
         sampler_type=sampler_type,
@@ -284,7 +293,18 @@ def do_train(cfg, model, resume=False):
         metric_logger.update(last_layer_lr=last_layer_lr)
         metric_logger.update(current_batch_size=current_batch_size)
         metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
+        
+        if distributed.is_main_process():
+            wandb.log({"Learning Rate":lr,
+                        "Momentum": mom,
+                        "Last Layer LR": last_layer_lr,
+                        "Learning Rate":lr,
+                        "Total Loss":losses_reduced
+                })
+            wandb.log(loss_dict)
 
+
+        
         # checkpointing and testing
 
         if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0:
@@ -302,12 +322,19 @@ def main(args):
 
     model = SSLMetaArch(cfg).to(torch.device("cuda"))
     #Load model here from pretrained.
-    if cfg.train.use_pretrained and "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
+    if False:#cfg.train.use_pretrained and "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
         print("load small")
+        
         model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
         model_pretrained = model_pretrained.to(torch.device("cuda"))
         model.student.backbone.patch_embed.proj.weight = model_pretrained.patch_embed.proj.weight
+        print(model.state_dict().keys())
+        print(model_pretrained.state_dict().keys())
+        print(model_pretrained.pos_embed.shape)#1, 1370, 384. #Why is this different?
+        print(model.student.backbone.pos_embed.shape)
 
+        #We need to make sure we grab *all* of the keys.
+        exit()
         #For each block, copy weights over.
         layers = []
         for layer in model_pretrained.blocks:
@@ -345,3 +372,4 @@ def main(args):
 if __name__ == "__main__":
     args = get_args_parser(add_help=True).parse_args()
     main(args)
+
