@@ -7,7 +7,18 @@ import argparse
 import logging
 import math
 import os
+import sys
 from functools import partial
+
+# PSS: this block of imports is new 
+import wandb
+import pathlib
+import inspect
+import shutil
+import re
+import time
+import json
+from omegaconf import OmegaConf
 
 from fvcore.common.checkpoint import PeriodicCheckpointer
 import torch
@@ -22,10 +33,14 @@ from dinov2.utils.utils import CosineScheduler
 
 from dinov2.train.ssl_meta_arch import SSLMetaArch
 
+# FSDP models need special handling
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullStateDictConfig, StateDictType
+
 
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
 logger = logging.getLogger("dinov2")
-import wandb
+
 
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("DINOv2 training", add_help=add_help)
@@ -119,16 +134,39 @@ def apply_optim_scheduler(optimizer, lr, wd, last_layer_lr):
         param_group["lr"] = (last_layer_lr if is_last_layer else lr) * lr_multiplier
 
 
-def do_test(cfg, model, iteration):
-    new_state_dict = model.teacher.state_dict()
+# def do_test(cfg, model, iteration):
+#     new_state_dict = model.teacher.state_dict()
 
-    if distributed.is_main_process():
-        iterstring = str(iteration)
-        eval_dir = os.path.join(cfg.train.output_dir, "eval", iterstring)
-        os.makedirs(eval_dir, exist_ok=True)
-        # save teacher checkpoint
-        teacher_ckp_path = os.path.join(eval_dir, "teacher_checkpoint.pth")
-        torch.save({"teacher": new_state_dict}, teacher_ckp_path)
+#     if distributed.is_main_process():
+#         iterstring = str(iteration)
+#         eval_dir = os.path.join(cfg.train.output_dir, "eval", iterstring)
+#         os.makedirs(eval_dir, exist_ok=True)
+#         # save teacher checkpoint
+#         teacher_ckp_path = os.path.join(eval_dir, "teacher_checkpoint.pth")
+#         torch.save({"teacher": new_state_dict}, teacher_ckp_path)
+
+def do_test(cfg, model, iteration):
+    """Save checkpoints only - run evaluation separately."""    
+    # Create checkpoint directory
+    ckpt_dir = os.path.join(cfg.train.output_dir, "checkpoints", f"iter_{iteration:06d}")
+    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt_path = os.path.join(ckpt_dir, "teacher.pth")
+    
+    # Save checkpoint
+    logger.info(f"Saving checkpoint at iteration {iteration}")
+    start_time = time.time()
+    
+    torch.save({
+        "teacher": model.teacher.state_dict(),
+        "iteration": iteration,
+        "epoch": iteration / cfg.train.OFFICIAL_EPOCH_LENGTH,
+        "config": OmegaConf.to_container(cfg, resolve=True),
+    }, ckpt_path)
+    
+    save_time = time.time() - start_time
+    file_size = os.path.getsize(ckpt_path) / 1e9
+    
+    logger.info(f"Checkpoint saved: {file_size:.2f} GB in {save_time:.2f} seconds")
 
 
 def do_train(cfg, model, resume=False):
@@ -146,15 +184,27 @@ def do_train(cfg, model, resume=False):
         teacher_temp_schedule,
         last_layer_lr_schedule,
     ) = build_schedulers(cfg)
-    
-    from omegaconf import OmegaConf
+
     if distributed.is_main_process():
         run = wandb.init(
-            project="midnight-rep",  # Specify your project
-            config = OmegaConf.to_container(cfg)
+            project=os.environ.get("WANDB_PROJECT", "dinov2"),
+            entity=os.environ.get("WANDB_ENTITY"),         
+            config=OmegaConf.to_container(cfg, resolve=True)
         )
-
-
+        
+        ## ---- save the resolved config ---------------------------------
+        cfg_path = pathlib.Path(wandb.run.dir) / "config.yaml"
+        OmegaConf.save(cfg, cfg_path)
+    
+        ## ---- copy *this* training script and upload both --------------------
+        script_src = pathlib.Path(inspect.getfile(sys.modules[__name__])).resolve()
+        script_dst = pathlib.Path(wandb.run.dir) / script_src.name
+        shutil.copy2(script_src, script_dst)
+    
+        art = wandb.Artifact(f"source_{wandb.run.id}", type="code")
+        art.add_file(cfg_path,   name="config.yaml")
+        art.add_file(script_dst, name="train.py")        # appears under Artifacts
+        wandb.run.log_artifact(art)
 
     # checkpointer
     checkpointer = FSDPCheckpointer(model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True)
@@ -200,7 +250,6 @@ def do_train(cfg, model, resume=False):
 
     # setup data loader
 
-    print("dataset path is", cfg.train.dataset_path)#This is the imagenet string shit
     dataset = make_dataset(
         dataset_str=cfg.train.dataset_path,
         transform=data_transform,
@@ -211,8 +260,7 @@ def do_train(cfg, model, resume=False):
     data_loader = make_data_loader(
         dataset=dataset,
         batch_size=cfg.train.batch_size_per_gpu,
-        #        num_workers=cfg.train.num_workers,
-        num_workers = 1,
+        num_workers=cfg.train.num_workers,
         shuffle=True,
         seed=start_iter,  # TODO: Fix this -- cfg.train.seed
         sampler_type=sampler_type,
@@ -230,7 +278,6 @@ def do_train(cfg, model, resume=False):
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
 
-    
     for data in metric_logger.log_every(
         data_loader,
         10,
@@ -293,7 +340,7 @@ def do_train(cfg, model, resume=False):
         metric_logger.update(last_layer_lr=last_layer_lr)
         metric_logger.update(current_batch_size=current_batch_size)
         metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
-        
+
         if distributed.is_main_process():
             wandb.log({"Learning Rate":lr,
                         "Momentum": mom,
@@ -303,12 +350,9 @@ def do_train(cfg, model, resume=False):
                 })
             wandb.log(loss_dict)
 
-
-        
         # checkpointing and testing
-
-        if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0:
-            do_test(cfg, model, f"training_{iteration}")
+        if (iteration==1) or ((iteration + 1) % cfg.evaluation.eval_period_iterations == 0):
+            do_test(cfg, model, iteration)
             torch.cuda.synchronize()
         periodic_checkpointer.step(iteration)
 
@@ -321,39 +365,6 @@ def main(args):
     cfg = setup(args)
 
     model = SSLMetaArch(cfg).to(torch.device("cuda"))
-    #Load model here from pretrained.
-    if False:#cfg.train.use_pretrained and "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
-        print("load small")
-        
-        model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
-        model_pretrained = model_pretrained.to(torch.device("cuda"))
-        model.student.backbone.patch_embed.proj.weight = model_pretrained.patch_embed.proj.weight
-        print(model.state_dict().keys())
-        print(model_pretrained.state_dict().keys())
-        print(model_pretrained.pos_embed.shape)#1, 1370, 384. #Why is this different?
-        print(model.student.backbone.pos_embed.shape)
-
-        #We need to make sure we grab *all* of the keys.
-        exit()
-        #For each block, copy weights over.
-        layers = []
-        for layer in model_pretrained.blocks:
-            layers.append(layer)
-        i = 0
-        for layer in model.student.backbone.blocks:
-            for sublayer in layer:
-                if type(sublayer) != torch.nn.Identity:
-                    #So we have the subblock, now we need to convert
-                    current = layers.pop(0)
-                    sublayer.norm1.weight = current.norm1.weight
-                    sublayer.attn.qkv.weight = current.attn.qkv.weight
-                    sublayer.attn.proj.weight = current.attn.proj.weight
-                    sublayer.norm2.weight = current.norm2.weight
-                    sublayer.mlp.fc1.weight = current.mlp.fc1.weight
-                    sublayer.mlp.fc2.weight = current.mlp.fc2.weight
-
-        model.student.backbone.norm.weight = model_pretrained.norm.weight
-
     model.prepare_for_distributed_training()
 
     logger.info("Model:\n{}".format(model))
@@ -364,7 +375,7 @@ def main(args):
             .get("iteration", -1)
             + 1
         )
-        return do_test(cfg, model, f"manual_{iteration}")
+        return do_test(cfg, model, iteration)
 
     do_train(cfg, model, resume=not args.no_resume)
 
@@ -372,4 +383,3 @@ def main(args):
 if __name__ == "__main__":
     args = get_args_parser(add_help=True).parse_args()
     main(args)
-

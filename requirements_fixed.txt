@@ -1,0 +1,8 @@
+torchmetrics
+fvcore
+iopath
+submitit
+cuml-cu11
+fvcore
+omegaconf
+wandb

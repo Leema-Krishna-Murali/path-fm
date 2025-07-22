@@ -10,7 +10,7 @@ from typing import Any, Callable, List, Optional, TypeVar
 import torch
 from torch.utils.data import Sampler
 
-from .datasets import ImageNet, ImageNet22k, TestVisionDataset, SlideDataset
+from .datasets import ImageNet, ImageNet22k
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
 
 
@@ -42,7 +42,6 @@ def _make_sample_transform(image_transform: Optional[Callable] = None, target_tr
 
 
 def _parse_dataset_str(dataset_str: str):
-
     tokens = dataset_str.split(":")
 
     name = tokens[0]
@@ -59,9 +58,6 @@ def _parse_dataset_str(dataset_str: str):
             kwargs["split"] = ImageNet.Split[kwargs["split"]]
     elif name == "ImageNet22k":
         class_ = ImageNet22k
-    elif name.lower() == "pathology":
-        class_ = SlideDataset
-        print("kwargs", kwargs)
     else:
         raise ValueError(f'Unsupported dataset "{name}"')
 
@@ -217,7 +213,6 @@ def make_data_loader(
         drop_last=drop_last,
         persistent_workers=persistent_workers,
         collate_fn=collate_fn,
-        timeout=600,
     )
 
     try:

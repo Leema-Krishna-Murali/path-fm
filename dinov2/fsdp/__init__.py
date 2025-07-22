@@ -62,8 +62,8 @@ def is_sharded_fsdp(x):
     return is_fsdp(x) and x.sharding_strategy is not ShardingStrategy.NO_SHARD
 
 
-def free_if_fsdp(x):
-    if is_sharded_fsdp(x):
+def free_if_fsdp(x: FSDP):
+    if is_sharded_fsdp(x) and x._has_params:
         handle = x._handle
         _reshard(x, handle, True)
 
