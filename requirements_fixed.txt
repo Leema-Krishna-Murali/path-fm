@@ -6,3 +6,5 @@ cuml-cu11
 fvcore
 omegaconf
 wandb
+scikit-image
+opencv-python

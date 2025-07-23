@@ -1,0 +1,75 @@
+include: dinov2/configs/ssl_default_config.yaml
+
+# Pathology-specific training configuration - based on vitl16_h100_30ep.yaml
+# Training configuration with checkpoint settings
+train:
+  batch_size_per_gpu: 32         
+  num_workers: 12                  
+  saveckp_freq: 10
+  checkpoint_after_first_epoch: true
+
+# Model configuration with pre-trained weights - ViT-L/14 with registers
+student:
+  arch: vit_large
+  patch_size: 14  # Must match pre-trained checkpoint
+  block_chunks: 0
+  drop_path_rate: 0.3
+  num_register_tokens: 4  # Required for reg4 checkpoint
+
+# Tile/crop configuration - maintain pre-trained compatibility
+# Using 518 global crops to match pre-trained model size
+crops:
+  local_crops_number: 6           # Reduced from 8 to save memory
+  global_crops_size: 518          # Keep 518 for pre-trained compatibility
+  local_crops_size: 98            # Keep 98 (divisible by 14)
+  global_crops_scale:
+    - 0.14
+    - 1.0
+  local_crops_scale:
+    - 0.05
+    - 0.14
+
+# Optimizer settings - standard DINOv2 parameters
+optim:
+  epochs: 30                     # 500 -> 30 for testing purposes
+  warmup_epochs: 3               # Compressed warm-up for shorter training
+  base_lr: 0.004                 
+  lr: 0.
+  weight_decay: 0.04
+  weight_decay_end: 0.4
+  clip_grad: 3.0
+  layerwise_decay: 0.9
+
+# Teacher settings
+teacher:
+  warmup_teacher_temp_epochs: 5   # Match shorter training duration
+  warmup_teacher_temp: 0.04
+  teacher_temp: 0.07
+  momentum_teacher: 0.992
+  final_momentum_teacher: 1.0
+
+# Evaluation settings
+evaluation:
+  eval_period_iterations: 5000
+
+# DINO settings 
+dino:
+  loss_weight: 1.0
+  head_n_prototypes: 65536       # Standard prototype space
+  head_bottleneck_dim: 256
+  head_nlayers: 3
+  head_hidden_dim: 2048
+  koleo_loss_weight: 0.1
+
+# IBOT settings
+ibot:
+  loss_weight: 1.0
+  mask_sample_probability: 0.5
+  mask_ratio_min_max:
+    - 0.15
+    - 0.7
+  separate_head: false
+  head_n_prototypes: 65536
+  head_bottleneck_dim: 256
+  head_nlayers: 3
+  head_hidden_dim: 2048

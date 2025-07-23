@@ -18,6 +18,7 @@ import shutil
 import re
 import time
 import json
+import gc
 from omegaconf import OmegaConf
 
 from fvcore.common.checkpoint import PeriodicCheckpointer
@@ -289,6 +290,11 @@ def do_train(cfg, model, resume=False):
         if iteration > max_iter:
             return
 
+        # Log tile rejection stats periodically
+        if iteration % 1000 == 0 and distributed.is_main_process():
+            if hasattr(data_loader.dataset, 'print_rejection_summary'):
+                data_loader.dataset.print_rejection_summary()
+
         # apply schedules
 
         lr = lr_schedule[iteration]
@@ -321,6 +327,10 @@ def do_train(cfg, model, resume=False):
         # perform teacher EMA update
 
         model.update_teacher(mom)
+
+        # memory cleanup after processing batch
+        gc.collect()
+        torch.cuda.empty_cache()
 
         # logging
 
@@ -355,6 +365,10 @@ def do_train(cfg, model, resume=False):
             do_test(cfg, model, iteration)
             torch.cuda.synchronize()
         periodic_checkpointer.step(iteration)
+
+        # memory cleanup after checkpointing
+        gc.collect()
+        torch.cuda.empty_cache()
 
         iteration = iteration + 1
     metric_logger.synchronize_between_processes()
