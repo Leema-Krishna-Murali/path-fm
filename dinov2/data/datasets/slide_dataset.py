@@ -14,6 +14,7 @@ from openslide import OpenSlide#other options?
 import random
 import numpy as np
 import cv2
+import random
 
 class SlideDataset(ExtendedVisionDataset):
     def __init__(self, root, *args, **kwargs) -> None:
@@ -29,55 +30,94 @@ class SlideDataset(ExtendedVisionDataset):
         print("Found this many files", len(self.image_files))
         
 
+    def get_all(self, index):
+
+        path = self.image_files[index]
+        image = OpenSlide(path)
+        
+
+        #for level in range(0, image.level_count):
+        #    image.read_region((0,0), level = level, size=(224, 244))
+        return image, path
+
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
-        try:
+        debug = False
+        if True:
             path = self.image_files[index]
+            if debug:
+                print(path)
             image = OpenSlide(path)
             image_levels = image.level_count
-            #print("This many image levels", image_levels)
-            #print("This dim", image.level_dimensions)#((49933, 41465), (12483, 10366), (3120, 2591))
+            if debug:
+                print("This many image levels", image_levels)
+                print("This dim", image.level_dimensions)#((49933, 41465), (12483, 10366), (3120, 2591))
 
             #for key, value in image.properties.items():
             #    print(f"{key}: {value}")
-            #Decide on a magnification. For testing purposes, it'll be always level 0
-            level = random.randomint(0, image_levels - 1)
+
+            level = random.randint(0, image_levels - 1)
+            if debug:
+                print("picked", level)
             patch_size = 224
             height = image.level_dimensions[0][1]
             width = image.level_dimensions[0][0]
-            
-            #print("starting hsv loop")
+            if debug:
+                print("these dims", image.level_dimensions[level])
+            if False:#debug saving all.
+                full = image.read_region((0,0), level = level, size=(int(width), int(height)))
+                full.save("full.png")
+                print("saved full")
+
+            #read_region is based on the top left pixel in the level 0, not our current
             i = 0
             while True:
-                print(i)
+                if debug:
+                    print("start loop", flush = True)
                 i = i + 1
-                if i == 10000:
-                    print("Couldn't find matching item in slide", path)
+                if i == 100:
+                    print("Couldn't find matching item in slide", path, flush = True)
                     exit()
+                if debug:
+                    print("iteration", i)
+                #4403, 4645) 
                 x = random.randint(0, width - patch_size)
                 y = random.randint(0, height - patch_size)
-                patch = image.read_region((x, y), level=0, size=(patch_size, patch_size))
+                if debug:
+                    print("Reading this", path, x, y, level)
+                try:
+                    patch = image.read_region((x, y), level=level, size=(patch_size, patch_size))
+                except:
+                    print("failed on path", path, x, y, level)
+                    exit()
 
                 # Convert to RGB (removes alpha channel)
                 patch = patch.convert("RGB")
+                 
+                if True:
+                    res = patch
+                    break
                 res = self.hsv(patch, patch_size)
+                print("have result", path, x, y, level)
                 if res == None:
                     pass
                 else:
                     break
-        except Exception as e:
-            print("Crash")
-            raise RuntimeError(f"can not read image for sample {index}") from e
+        #except Exception as e:
+        #    print("Crash", path)
+        #    print(e)
+        #    #raise RuntimeError(f"can not read image for sample {index}") from e
+        #    exit()
         
         #The transform used is a torchvision StandardTransform.
         #This means that it takes as input two things, and runs two different transforms on both.
         if self.transforms is not None:
             return self.transforms(res, None)
-        print("returning patch")
         return res, None
         
     def hsv(self, tile_rgb, patch_size):
-    
         
+        #tile_rgb.save("tile.png")
+
         tile = np.array(tile_rgb)
         tile = cv2.cvtColor(tile, cv2.COLOR_RGB2HSV)
         min_ratio = .6
@@ -93,7 +133,6 @@ class SlideDataset(ExtendedVisionDataset):
             #tile_rgb.show()
             return tile_rgb
         else:
-            #print("reject")
             #tile_rgb.show()
             return None
 
