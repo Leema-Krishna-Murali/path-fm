@@ -211,8 +211,8 @@ def do_train(cfg, model, resume=False):
     data_loader = make_data_loader(
         dataset=dataset,
         batch_size=cfg.train.batch_size_per_gpu,
-        #        num_workers=cfg.train.num_workers,
-        num_workers = 1,
+        num_workers=cfg.train.num_workers,
+        #num_workers = 1,
         shuffle=True,
         seed=start_iter,  # TODO: Fix this -- cfg.train.seed
         sampler_type=sampler_type,
@@ -254,6 +254,7 @@ def do_train(cfg, model, resume=False):
         # compute losses
 
         optimizer.zero_grad(set_to_none=True)
+
         loss_dict = model.forward_backward(data, teacher_temp=teacher_temp)
 
         # clip gradients
@@ -307,7 +308,8 @@ def do_train(cfg, model, resume=False):
         
         # checkpointing and testing
 
-        if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0:
+        #Save instantly
+        if cfg.evaluation.eval_period_iterations >= 0 and (iteration) % cfg.evaluation.eval_period_iterations == 0:
             do_test(cfg, model, f"training_{iteration}")
             torch.cuda.synchronize()
         periodic_checkpointer.step(iteration)
@@ -332,9 +334,12 @@ def main(args):
         print(model_pretrained.state_dict().keys())
         print(model_pretrained.pos_embed.shape)#1, 1370, 384. #Why is this different?
         print(model.student.backbone.pos_embed.shape)
+        
+        #Shape is wrong, can't copy... uhoh
+        #model.student.backbone.pos_embed = model_pretrained.pos_embed
 
         #We need to make sure we grab *all* of the keys.
-        exit()
+        #exit()
         #For each block, copy weights over.
         layers = []
         for layer in model_pretrained.blocks:
@@ -372,4 +377,3 @@ def main(args):
 if __name__ == "__main__":
     args = get_args_parser(add_help=True).parse_args()
     main(args)
-
