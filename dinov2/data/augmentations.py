@@ -180,7 +180,14 @@ class DataAugmentationDINO(object):
         global_crop_2 = self.global_transfo2(im2_base)
 
         output["global_crops"] = [global_crop_1, global_crop_2]
-
+        
+        #print("gloabl crop shapes", global_crop_1.shape)
+        #print(global_crop_2.shape)
+        from torchvision.utils import save_image
+        if False:#Saving
+            save_image(global_crop_1, "global.png")
+            save_image(global_crop_2, "global2.png")
+            exit()
         # global crops for teacher:
         output["global_crops_teacher"] = [global_crop_1, global_crop_2]
 
@@ -188,6 +195,10 @@ class DataAugmentationDINO(object):
         local_crops = [
             self.local_transfo(self.geometric_augmentation_local(image)) for _ in range(self.local_crops_number)
         ]
+        if False:
+            for i, local in enumerate(local_crops):
+                save_image(local, str(i) + "local" + ".png")
+            exit()
         output["local_crops"] = local_crops
         output["offsets"] = ()
 

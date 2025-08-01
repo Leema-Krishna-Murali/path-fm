@@ -10,9 +10,9 @@ ibot:
   head_n_prototypes: 131072
 train:
   batch_size_per_gpu: 32
-  dataset_path: ImageNet22k
+    #  dataset_path: ImageNet22k
   centering: sinkhorn_knopp
-  use_pretrained: True
+    # use_pretrained: True
 student:
   arch: vit_small
   patch_size: 14
@@ -24,10 +24,10 @@ student:
 teacher:
   momentum_teacher: 0.994
 optim:
-  epochs: 500
+  epochs: 50000
   weight_decay_end: 0.2
   base_lr: 2.0e-04  # learning rate for a batch size of 1024
-  warmup_epochs: 80
+    #warmup_epochs: 80
   layerwise_decay: 1.0
 crops:
   local_crops_size: 98
