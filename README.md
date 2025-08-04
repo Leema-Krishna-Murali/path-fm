@@ -2,9 +2,8 @@
 
 **[SophontAI](https://sophontai.com/)**
 
-DINOv2 is a very strong SSL algorithm. In this repository, following a plethora of works before us, we apply DINO(V2) to the pathology space.
-
-
+In this repository, following a plethora of works before us, we apply DINO(V2) to the pathology space.
+If you are interested in helping out, check the open Issues.
 ## Installation
 
 install.sh **(Recommended)**:
