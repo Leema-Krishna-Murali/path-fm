@@ -324,19 +324,23 @@ def main(args):
 
     model = SSLMetaArch(cfg).to(torch.device("cuda"))
     #Load model here from pretrained.
-    if False:#cfg.train.use_pretrained and "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
+    if True:#cfg.train.use_pretrained and "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
         print("load small")
         
         model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
         model_pretrained = model_pretrained.to(torch.device("cuda"))
         model.student.backbone.patch_embed.proj.weight = model_pretrained.patch_embed.proj.weight
+        model.student.backbone.patch_embed.proj.bias = model_pretrained.patch_embed.proj.bias
+        model.student.backbone.cls_token = model_pretrained.cls_token
+        model.student.backbone.register_tokens = model_pretrained.register_tokens
+        model.student.backbone.mask_token = model_pretrained.mask_token
+
         print(model.state_dict().keys())
         print(model_pretrained.state_dict().keys())
-        print(model_pretrained.pos_embed.shape)#1, 1370, 384. #Why is this different?
-        print(model.student.backbone.pos_embed.shape)
+        print(model_pretrained.pos_embed.shape)#1, 1360, 384. We lose the pos embed because it was 518.
+        print(model.student.backbone.pos_embed.shape)#1, 257, 384
+          
         
-        #Shape is wrong, can't copy... uhoh
-        #model.student.backbone.pos_embed = model_pretrained.pos_embed
 
         #We need to make sure we grab *all* of the keys.
         #exit()
@@ -351,15 +355,32 @@ def main(args):
                     #So we have the subblock, now we need to convert
                     current = layers.pop(0)
                     sublayer.norm1.weight = current.norm1.weight
+                    sublayer.norm1.bias = current.norm1.bias
+                    
                     sublayer.attn.qkv.weight = current.attn.qkv.weight
+                    sublayer.attn.qkv.bias=  current.attn.qkv.bias
+
                     sublayer.attn.proj.weight = current.attn.proj.weight
+                    sublayer.attn.proj.bias = current.attn.proj.bias
+
+
                     sublayer.norm2.weight = current.norm2.weight
+                    sublayer.norm2.bias = current.norm2.bias
+
                     sublayer.mlp.fc1.weight = current.mlp.fc1.weight
                     sublayer.mlp.fc2.weight = current.mlp.fc2.weight
+                    
+                    sublayer.mlp.fc1.bias = current.mlp.fc1.bias
+                    sublayer.mlp.fc2.bias = current.mlp.fc2.bias
+
+                    sublayer.ls1.gamma = current.ls1.gamma
+                    sublayer.ls2.gamma = current.ls2.gamma
 
         model.student.backbone.norm.weight = model_pretrained.norm.weight
+        model.student.backbone.norm.bias = model_pretrained.norm.bias 
 
     model.prepare_for_distributed_training()
+
 
     logger.info("Model:\n{}".format(model))
     if args.eval_only:
