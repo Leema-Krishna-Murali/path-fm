@@ -1,13 +1,40 @@
-# pathologyDino
+# Pathology DinoV2
 
-<div align="center">
-<h1>Pathology Feature Extractors and Foundation Models</h1>
-</div>
+**[SophontAI](https://sophontai.com/)**
 
-We are witnessing the emergence of many new feature extractors trained using self-supervised learning on large pathology datasets.
-This repository aims to provide a comprehensive list of these models, alongside key information about them.
+In this repository, following a plethora of works before us, we apply DINO(V2) to the pathology space.
+If you are interested in helping out, check the open Issues.
+## Installation
 
-I aim to update this list as new models are released, but please submit a pull request / issue for any models I have missed!
+install.sh **(Recommended)**:
+Clone the repository, and then run the provided installation script. 
+```shell
+bash install.sh
+```
+This will create a venv in your *current* directory called 'dino_env'. It will then install the requirements into that venv.
+If you want to install in a different location, you'll need to modify both instances of 'dino_env' in the script.
+
+## Training
+
+We provide a script, run.sh.
+This will activate the venv created above, and run training on a single node. 
+If you modified the venv directory, you will need to make that change in run.sh also.
+
+```shell
+bash run.sh
+```
+
+By default, we make only 4 GPUs visible, and run on those 4. If you want to change the indexes, modify the numbers after "CUDA_VISIBLE_DEVICES=0,1,2,3".
+
+If you change the number of GPUs, you will need to change the value of "--nproc_per_node=4" to properly reflect this.
+
+By default, we use a vits, with 4 registers. This is reflected in the config. 
+
+Output will be saved into the directory specificed by "--output_dir". Ensure that this directory does not contain any old files from training runs, or the code will attempt to resume instead.
+
+
+# Prior Work
+
 
 ## Patch-level models
 
