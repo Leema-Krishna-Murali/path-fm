@@ -33,6 +33,17 @@ By default, we use a vits, with 4 registers. This is reflected in the config.
 Output will be saved into the directory specificed by "--output_dir". Ensure that this directory does not contain any old files from training runs, or the code will attempt to resume instead.
 
 
+## Evaluation
+
+At this time, we use [Kaiko-Eva](https://github.com/kaiko-ai/eva) for evaluation.
+In order to test the [Bach](https://arxiv.org/abs/1808.04277) dataset, you will run:
+```
+eva predict fit --config dinov2/eval_config.yaml
+```
+Please modify the checkpoint_path to match the checkpoint you wish to test.
+Trained checkpoints will be found in output_dir/eval/training_X.
+
+
 # Prior Work
 
 
