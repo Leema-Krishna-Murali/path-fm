@@ -10,7 +10,7 @@ from typing import Any, Callable, List, Optional, TypeVar
 import torch
 from torch.utils.data import Sampler
 
-from .datasets import ImageNet, ImageNet22k, TestVisionDataset, SlideDataset
+from .datasets import ImageNet, ImageNet22k, TestVisionDataset, SlideDataset, SlideDatasetZarr
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
 
 
@@ -61,6 +61,9 @@ def _parse_dataset_str(dataset_str: str):
         class_ = ImageNet22k
     elif name.lower() == "pathology":
         class_ = SlideDataset
+        print("kwargs", kwargs)
+    elif "zarr" in name.lower():
+        class_ = SlideDatasetZarr
         print("kwargs", kwargs)
     else:
         raise ValueError(f'Unsupported dataset "{name}"')
