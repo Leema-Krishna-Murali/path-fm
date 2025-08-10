@@ -48,7 +48,7 @@ echo "R2 endpoint: $R2_ENDPOINT_URL"
 
 S3_ROOT="s3://tcga-zarr"
 export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
-CUDA_VISIBLE_DEVICES=1 torchrun --nproc_per_node=1 \
+CUDA_VISIBLE_DEVICES=1 torchrun --master_port=30001 --nproc_per_node=1 \
   dinov2/train/train.py \
   --config-file ./dinov2/configs/train/vits14_reg4.yaml \
   --output-dir ./output_pretrained_on_r2_zarr \

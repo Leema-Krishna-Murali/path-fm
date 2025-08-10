@@ -2,6 +2,8 @@
 import argparse, os, sys, json, time, shutil, subprocess, math, uuid
 from pathlib import Path
 from typing import List, Tuple, Optional, Iterable
+from subprocess import DEVNULL, PIPE
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 
 # pip install openslide-python zarr numcodecs pillow
@@ -127,7 +129,7 @@ def run(cmd: List[str]) -> int:
     print(" ", " ".join(cmd), flush=True)
     return subprocess.run(cmd).returncode
 
-def rclone_copy_and_check(local_dir: Path, remote_prefix: str, retries: int = 3, transfers: int = 32) -> bool:
+def rclone_copy_and_check(local_dir: Path, remote_prefix: str, retries: int = 3, transfers: int = 16) -> bool:
     """
     remote_prefix example: 'r2:tcga-zarr/TCGA' (remote:bucket/prefix)
     """
@@ -154,6 +156,27 @@ def append_state(state_path: Path, **record):
     with state_path.open("a") as f:
         f.write(json.dumps({**record, "ts": time.time()}) + "\n")
 
+def load_uploaded_from_state(state_path: Path) -> set[str]:
+    done = set()
+    if state_path.exists():
+        for line in state_path.read_text().splitlines():
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if rec.get("event") in ("uploaded", "deleted_local"):
+                s = rec.get("slide")
+                if s:
+                    done.add(s)
+    return done
+
+def remote_dir_exists(remote_prefix: str, slide_stem: str) -> bool:
+    # True if remote prefix contains any objects under <slide>.zarr/
+    dest = f"{remote_prefix}/{slide_stem}.zarr"
+    proc = subprocess.run(["rclone", "lsf", "--max-depth", "1", dest],
+                          stdout=PIPE, stderr=DEVNULL)
+    return proc.returncode == 0
+
 def process(
     svs_paths: List[Path],
     out_root: Path,
@@ -165,6 +188,7 @@ def process(
     compressor: str,
     clevel: int,
     exclude_file: Optional[Path],
+    workers: int = 1,
 ):
     ensure_dir(out_root)
     state_path = out_root / "state.jsonl"
@@ -172,6 +196,41 @@ def process(
     batch_bytes = 0
 
     print(f"[plan] {len(svs_paths)} SVS files to process")
+    # Fast path: parallel per-slide pipeline
+    if per_slide_upload and workers > 1:
+        print(f"[per-slide] parallel mode with {workers} workers")
+        def _one(svs: Path):
+            events = []
+            try:
+                zarr_dir = convert_svs_to_zarr(
+                    src=svs, dst_root=out_root, tile=tile,
+                    compressor_name=compressor, clevel=clevel, write_native_pyramid=True
+                )
+                size = dir_size_bytes(zarr_dir)
+                events.append({"event":"converted","slide":str(svs),"zarr":str(zarr_dir),"size":size})
+                ok = rclone_copy_and_check(zarr_dir, remote_prefix)
+                if ok:
+                    events.append({"event":"uploaded","slide":str(svs),"zarr":str(zarr_dir),"size":size})
+                    shutil.rmtree(zarr_dir, ignore_errors=True)
+                    events.append({"event":"deleted_local","slide":str(svs),"zarr":str(zarr_dir)})
+                else:
+                    events.append({"event":"upload_failed","slide":str(svs),"zarr":str(zarr_dir),"size":size})
+                return events
+            except Exception as e:
+                return [{"event":"error","slide":str(svs),"error":str(e)}]
+
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            futs = [ex.submit(_one, svs) for svs in svs_paths]
+            for idx, fut in enumerate(as_completed(futs), 1):
+                evs = fut.result()
+                for ev in evs:
+                    append_state(state_path, **ev)
+                # brief, friendly progress
+                last = evs[-1]
+                print(f"[{idx}/{len(futs)}] {last.get('slide','?')} -> {last['event']}")
+        return
+
+    # Sequential fallback (per-slide or batch)
     for i, svs in enumerate(svs_paths, 1):
         print(f"[{i}/{len(svs_paths)}] Converting: {svs}")
         zarr_dir = convert_svs_to_zarr(
@@ -241,12 +300,38 @@ def main():
     ap.add_argument("--clevel", type=int, default=5)
     ap.add_argument("--exclude-file", type=Path, default=None,
                     help="Optional list of paths to skip (one per line).")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="Parallel slides to process when --per-slide is set.")
+    ap.add_argument("--skip-if-remote-exists", action="store_true",
+                    help="Skip conversion if <remote>/<slide>.zarr already exists on R2.")
     args = ap.parse_args()
 
     svs_paths = list_svs(args.svs_root, args.exclude_file)
     if not svs_paths:
         print("No SVS files found. Check --svs-root.", file=sys.stderr)
         sys.exit(1)
+
+    # Resume: drop slides we already uploaded previously
+    state_path = args.zarr_root / "state.jsonl"
+    already_done = load_uploaded_from_state(state_path)
+    if already_done:
+        before = len(svs_paths)
+        svs_paths = [p for p in svs_paths if str(p) not in already_done]
+        print(f"[resume] skipped {before - len(svs_paths)} slides from state.jsonl")
+
+    # Optional: skip if remote already has the .zarr
+    if args.skip_if_remote_exists:
+        keep = []
+        skipped = 0
+        for p in svs_paths:
+            if remote_dir_exists(args.r2_remote_prefix, p.stem):
+                skipped += 1
+                append_state(state_path, slide=str(p), event="skipped_remote_exists")
+            else:
+                keep.append(p)
+        svs_paths = keep
+        if skipped:
+            print(f"[resume] skipped {skipped} slides present on remote")
 
     process(
         svs_paths=svs_paths,
@@ -258,7 +343,8 @@ def main():
         tile=args.tile,
         compressor=args.compressor,
         clevel=args.clevel,
-        exclude_file=args.exclude_file
+        exclude_file=args.exclude_file,
+        workers=args.workers,
     )
 
 if __name__ == "__main__":
@@ -271,3 +357,4 @@ if __name__ == "__main__":
 #   --exclude-file baddata.txt \
 #   --per-slide \
 #   --tile 512
+#   --workers 12
