@@ -267,8 +267,7 @@ if __name__ == "__main__":
 # python svs_to_zarr_r2.py \
 #   --svs-root /data/TCGA \
 #   --zarr-root /data/TCGA_zarr \
-#   --r2-remote-prefix r2:tcga-zarr/TCGA \
+#   --r2-remote-prefix sophont:tcga-zarr \
 #   --exclude-file baddata.txt \
-#   --batch-tib 2.0 \
-#   --tile 512 \
-#   --min-free-gib 200
+#   --per-slide \
+#   --tile 512

@@ -167,7 +167,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-
+#### Convert just a subset of tcga to zarr for test purposes ####
 # python scripts/convert_tcga_to_zarr_subset.py \
-#   --src-root /data/TCGA --dst-root /data/TCGA_zarr \
-#   --budget-gb 100 --levels 0,1,2 --chunk 512 --clevel 5 --workers 8
+#   --src-root /data/TCGA --dst-root /home/paul/TCGA_zarr \
+#   --budget-gb 30 --levels 0,1,2 --chunk 512 --clevel 5 --workers 8
