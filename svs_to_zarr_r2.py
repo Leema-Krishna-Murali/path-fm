@@ -357,4 +357,5 @@ if __name__ == "__main__":
 #   --exclude-file baddata.txt \
 #   --per-slide \
 #   --tile 512
-#   --workers 12
+#   --workers 6
+#   --skip-if-remote-exists
