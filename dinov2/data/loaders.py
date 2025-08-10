@@ -48,10 +48,17 @@ def _parse_dataset_str(dataset_str: str):
     name = tokens[0]
     kwargs = {}
 
+    # Handle the case where the value contains ":" (like s3:// URLs)
     for token in tokens[1:]:
-        key, value = token.split("=")
-        assert key in ("root", "extra", "split")
-        kwargs[key] = value
+        if "=" in token:
+            key, value = token.split("=", 1)  # Split on first "=" only
+            assert key in ("root", "extra", "split")
+            kwargs[key] = value
+        else:
+            # This might be part of a URL, append to the last key's value
+            if kwargs:
+                last_key = list(kwargs.keys())[-1]
+                kwargs[last_key] += ":" + token
 
     if name == "ImageNet":
         class_ = ImageNet
