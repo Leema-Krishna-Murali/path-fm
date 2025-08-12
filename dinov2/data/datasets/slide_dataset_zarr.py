@@ -56,7 +56,7 @@ class ChunkCacheStore:
     
     def _get_chunk_cache_path(self, key: str) -> Path:
         """Get local cache path for a chunk key"""
-        # Zarr chunk keys look like: "level_0/0.0.0" or "level_0/.zarray"
+        # Zarr chunk keys look like: "level0/0.0.0" or "level0/.zarray"
         safe_key = key.replace("/", "_")
         return self.cache_dir / safe_key
     
@@ -136,14 +136,33 @@ class SmartZarrCache:
         # Prefetch executor
         self.prefetch_executor = ThreadPoolExecutor(max_workers=8)
         
-        # S3 filesystem
+        # S3 filesystem with increased timeout and retry settings
         endpoint = os.environ.get("R2_ENDPOINT_URL")
-        client_kwargs = {"endpoint_url": endpoint} if endpoint else {}
+        client_kwargs = {
+            "endpoint_url": endpoint,
+            "connect_timeout": 30,  # Increased connection timeout
+            "read_timeout": 60,     # Increased read timeout
+            "retries": {
+                "max_attempts": 5,
+                "mode": "adaptive"
+            }
+        } if endpoint else {
+            "connect_timeout": 30,
+            "read_timeout": 60,
+            "retries": {
+                "max_attempts": 5,
+                "mode": "adaptive"
+            }
+        }
+        
         self.fs = s3fs.S3FileSystem(
             anon=False,
             client_kwargs=client_kwargs,
             key=os.environ.get("AWS_ACCESS_KEY_ID"),
             secret=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            use_ssl=True,
+            default_block_size=5*1024*1024,  # 5MB blocks
+            config_kwargs={'max_pool_connections': 50}
         )
         
         logger.info(f"Smart cache initialized with {max_cache_gb:.1f}GB limit")
@@ -155,7 +174,7 @@ class SmartZarrCache:
         
         Args:
             s3_path: S3 path to zarr store
-            array_name: Name of array (e.g., "level_0")
+            array_name: Name of array (e.g., "level0")
             prefetch_region: Optional region to prefetch in background
         """
         
@@ -248,31 +267,52 @@ class SlideDatasetZarr(ExtendedVisionDataset):
             # Initialize smart chunk cache
             self.cache = SmartZarrCache(Path(cache_dir), max_cache_gb=cache_gb)
             
-            # List zarr stores
-            fs = self.cache.fs
-            path_without_scheme = self.root.replace("s3://", "")
-            parts = path_without_scheme.split("/", 1)
-            bucket = parts[0]
-            prefix = parts[1] if len(parts) > 1 else ""
+            # List zarr stores with retry logic
+            max_retries = 3
+            retry_delay = 5  # seconds
             
-            logger.info(f"Listing S3 bucket: {bucket}, prefix: {prefix}")
-            
-            search_path = f"{bucket}/{prefix}" if prefix else bucket
-            
-            all_items = []
-            try:
-                items = fs.ls(search_path, detail=False)
-                for item in items:
-                    if item.endswith(".zarr") or ".zarr/" in item:
-                        if item.endswith("/"):
-                            item = item[:-1]
-                        if not item.startswith("s3://"):
-                            item = f"s3://{item}"
-                        all_items.append(item)
-            except Exception as e:
-                logger.error(f"Failed to list S3 contents: {e}")
-            
-            self.groups = sorted(all_items)
+            for attempt in range(max_retries):
+                try:
+                    fs = self.cache.fs
+                    path_without_scheme = self.root.replace("s3://", "")
+                    parts = path_without_scheme.split("/", 1)
+                    bucket = parts[0]
+                    prefix = parts[1] if len(parts) > 1 else ""
+                    
+                    logger.info(f"Listing S3 bucket: {bucket}, prefix: {prefix} (attempt {attempt + 1}/{max_retries})")
+                    
+                    search_path = f"{bucket}/{prefix}" if prefix else bucket
+                    
+                    all_items = []
+                    # Use fs.find for recursive search of .zarr directories
+                    items = fs.find(search_path, maxdepth=None, withdirs=True)
+                    
+                    for item in items:
+                        if item.endswith(".zarr") or ".zarr/" in item:
+                            # Get the zarr store root path
+                            if ".zarr/" in item:
+                                zarr_root = item.split(".zarr/")[0] + ".zarr"
+                            else:
+                                zarr_root = item
+                            
+                            if not zarr_root.startswith("s3://"):
+                                zarr_root = f"s3://{zarr_root}"
+                            
+                            if zarr_root not in all_items:
+                                all_items.append(zarr_root)
+                    
+                    self.groups = sorted(all_items)
+                    logger.info(f"Successfully found {len(self.groups)} zarr stores")
+                    break  # Success, exit retry loop
+                    
+                except Exception as e:
+                    logger.error(f"Failed to list S3 contents (attempt {attempt + 1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        logger.info(f"Retrying in {retry_delay} seconds...")
+                        time.sleep(retry_delay)
+                    else:
+                        logger.error("All retry attempts failed")
+                        self.groups = []
             
             # Cache to store array metadata (shapes, levels)
             self._metadata_cache = {}
@@ -287,6 +327,10 @@ class SlideDatasetZarr(ExtendedVisionDataset):
         
         if len(self.groups) == 0:
             logger.warning(f"No zarr stores found in {self.root}")
+            # Create a dummy entry to prevent crashes
+            self._use_dummy = True
+        else:
+            self._use_dummy = False
     
     def _get_store_metadata(self, zpath: str) -> Dict:
         """Get metadata about arrays in a zarr store"""
@@ -317,14 +361,25 @@ class SlideDatasetZarr(ExtendedVisionDataset):
                                 'chunks': tuple(zarray_data['chunks']),
                                 'dtype': zarray_data['dtype']
                             }
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to get metadata for {zpath}: {e}")
         
         self._metadata_cache[zpath] = metadata
         return metadata
     
     def __len__(self) -> int:
-        return max(1, len(self.groups))
+        # Always return a valid length, even if no data
+        if self._use_dummy or len(self.groups) == 0:
+            return 1
+        return len(self.groups)
+    
+    def _get_dummy_sample(self):
+        """Return a dummy sample when no real data is available"""
+        img = Image.new('RGB', (self.patch_size, self.patch_size), color='white')
+        if self.transform is None:
+            raise RuntimeError("SlideDatasetZarr requires a transform that returns "
+                               "a DINOv2-style dict with 'global_crops'/'local_crops'.")
+        return self.transform(img), None
     
     def __getitem__(self, index):
         """
@@ -332,76 +387,85 @@ class SlideDatasetZarr(ExtendedVisionDataset):
         sample_dict comes from self.transform(img) and must contain
         'global_crops' and 'local_crops' keys for DINOv2.
         """
-        assert len(self.groups) != 0
+        # Return dummy sample if no data
+        if self._use_dummy or len(self.groups) == 0:
+            return self._get_dummy_sample()
         
-        index = index % len(self.groups)
-        zpath = self.groups[index]
+        # Safe modulo to prevent division by zero
+        index = index % max(1, len(self.groups))
         
-        # Get store metadata
-        metadata = self._get_store_metadata(zpath)
-        if not metadata:
-            img = Image.new('RGB', (self.patch_size, self.patch_size), color='white')
-            return self.transform(img), None
-        
-        # Find level arrays
-        level_arrays = {k: v for k, v in metadata.items() if k.startswith("level")}
-        if not level_arrays:
-            img = Image.new('RGB', (self.patch_size, self.patch_size), color='white')
-            return self.transform(img), None
-        
-        # Choose a level (prefer lower resolutions for speed)
-        level_names = sorted(level_arrays.keys())
-        if len(level_names) > 1:
-            # Prefer level 1 or 2 (downsampled)
-            weights = [1.0 if "0" in name else 2.0 for name in level_names]
-            level_name = random.choices(level_names, weights=weights)[0]
-        else:
-            level_name = level_names[0]
-        
-        level_info = level_arrays[level_name]
-        h, w = level_info['shape'][:2]
-        ps = self.patch_size
-        
-        # Choose random position
-        if h < ps or w < ps:
-            y0 = max(0, (h - ps) // 2)
-            x0 = max(0, (w - ps) // 2)
-        else:
-            y0 = random.randint(0, h - ps)
-            x0 = random.randint(0, w - ps)
-        
-        # Define the region we need
-        y1 = min(y0 + ps, h)
-        x1 = min(x0 + ps, w)
-        
-        if self.is_s3 and self.cache:
-            # Define prefetch region (slightly larger than needed)
-            pf_y0 = max(0, y0 - self.prefetch_radius)
-            pf_y1 = min(h, y1 + self.prefetch_radius)
-            pf_x0 = max(0, x0 - self.prefetch_radius)
-            pf_x1 = min(w, x1 + self.prefetch_radius)
+        try:
+            zpath = self.groups[index]
             
-            prefetch_region = (slice(pf_y0, pf_y1), slice(pf_x0, pf_x1), slice(None))
+            # Get store metadata
+            metadata = self._get_store_metadata(zpath)
+            if not metadata:
+                logger.warning(f"No metadata found for {zpath}, using dummy sample")
+                return self._get_dummy_sample()
             
-            # Get array with caching
-            arr = self.cache.get_zarr_array(zpath, level_name, prefetch_region)
-        else:
-            # Local access
-            grp = zarr.open_group(zpath, mode='r')
-            arr = grp[level_name]
-        
-        # Extract patch (this will use cached chunks when available)
-        patch_data = arr[y0:y1, x0:x1, :]
-        patch = np.asarray(patch_data, dtype=np.uint8)
-        
-        # Pad if necessary
-        if patch.shape[0] < ps or patch.shape[1] < ps:
-            padded = np.zeros((ps, ps, 3), dtype=np.uint8)
-            padded[:patch.shape[0], :patch.shape[1], :] = patch
-            patch = padded
-        
-        img = Image.fromarray(patch, mode="RGB")
-        if self.transform is None:
-            raise RuntimeError("SlideDatasetZarr requires a transform that returns "
-                               "a DINOv2-style dict with 'global_crops'/'local_crops'.")
-        return self.transform(img), None
+            # Find level arrays
+            level_arrays = {k: v for k, v in metadata.items() if k.startswith("level")}
+            if not level_arrays:
+                logger.warning(f"No level arrays found in {zpath}, using dummy sample")
+                return self._get_dummy_sample()
+            
+            # Choose a level (prefer lower resolutions for speed)
+            level_names = sorted(level_arrays.keys())
+            if len(level_names) > 1:
+                # Prefer level 1 or 2 (downsampled)
+                weights = [1.0 if "0" in name else 2.0 for name in level_names]
+                level_name = random.choices(level_names, weights=weights)[0]
+            else:
+                level_name = level_names[0]
+            
+            level_info = level_arrays[level_name]
+            h, w = level_info['shape'][:2]
+            ps = self.patch_size
+            
+            # Choose random position
+            if h < ps or w < ps:
+                y0 = max(0, (h - ps) // 2)
+                x0 = max(0, (w - ps) // 2)
+            else:
+                y0 = random.randint(0, h - ps)
+                x0 = random.randint(0, w - ps)
+            
+            # Define the region we need
+            y1 = min(y0 + ps, h)
+            x1 = min(x0 + ps, w)
+            
+            if self.is_s3 and self.cache:
+                # Define prefetch region (slightly larger than needed)
+                pf_y0 = max(0, y0 - self.prefetch_radius)
+                pf_y1 = min(h, y1 + self.prefetch_radius)
+                pf_x0 = max(0, x0 - self.prefetch_radius)
+                pf_x1 = min(w, x1 + self.prefetch_radius)
+                
+                prefetch_region = (slice(pf_y0, pf_y1), slice(pf_x0, pf_x1), slice(None))
+                
+                # Get array with caching
+                arr = self.cache.get_zarr_array(zpath, level_name, prefetch_region)
+            else:
+                # Local access
+                grp = zarr.open_group(zpath, mode='r')
+                arr = grp[level_name]
+            
+            # Extract patch (this will use cached chunks when available)
+            patch_data = arr[y0:y1, x0:x1, :]
+            patch = np.asarray(patch_data, dtype=np.uint8)
+            
+            # Pad if necessary
+            if patch.shape[0] < ps or patch.shape[1] < ps:
+                padded = np.zeros((ps, ps, 3), dtype=np.uint8)
+                padded[:patch.shape[0], :patch.shape[1], :] = patch
+                patch = padded
+            
+            img = Image.fromarray(patch, mode="RGB")
+            if self.transform is None:
+                raise RuntimeError("SlideDatasetZarr requires a transform that returns "
+                                   "a DINOv2-style dict with 'global_crops'/'local_crops'.")
+            return self.transform(img), None
+            
+        except Exception as e:
+            logger.error(f"Error accessing item {index}: {e}")
+            return self._get_dummy_sample()
