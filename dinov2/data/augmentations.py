@@ -35,18 +35,18 @@ class hed_mod(torch.nn.Module):
             img_orig = img
             hed_image = rgb2hed(img)
             #Modify channels, each with random amount, between -.05 and .05
-            mini = -.05
-            maxi = .05
-            total = maxi - mini
+            mini = -.01
+            maxi = .01
             
             if False:
-                hed_image[..., 0] *= (1 + random.uniform(0, total) - maxi)#H
-                hed_image[..., 1] *= (1 + random.uniform(0, total) - maxi)#E
-                hed_image[..., 2] *= (1 + random.uniform(0, total) - maxi)#D
+                hed_image[..., 0] *= (1 + random.uniform(mini, maxi))#H
+                hed_image[..., 1] *= (1 + random.uniform(mini, maxi))#E
+                hed_image[..., 2] *= (1 + random.uniform(mini, maxi))#D
             else:
-                hed_image[..., 0] += random.uniform(0, total) - maxi#H
-                hed_image[..., 1] += random.uniform(0, total) - maxi#E
-                hed_image[..., 2] += random.uniform(0, total) - maxi#D
+                hed_image[..., 0] += random.uniform(mini, maxi)#H
+                hed_image[..., 1] += random.uniform(mini, maxi)#E
+                hed_image[..., 2] += random.uniform(mini, maxi)#D
+
            
             img = hed2rgb(hed_image)
 
