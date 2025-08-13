@@ -241,6 +241,10 @@ def do_train(cfg, model, resume=False):
         current_batch_size = data["collated_global_crops"].shape[0] / 2
         if iteration > max_iter:
             return
+        
+        if iteration >= 6500:
+            for param in model.parameters():
+                param.requires_grad = True
 
         # apply schedules
 
@@ -379,8 +383,17 @@ def main(args):
         model.student.backbone.norm.weight = model_pretrained.norm.weight
         model.student.backbone.norm.bias = model_pretrained.norm.bias 
 
-    model.prepare_for_distributed_training()
+    if True:#partial freeze
+        for param in model.parameters():
+            param.requires_grad = False
+        for param in model.student.ibot_head.parameters():
+            param.requires_grad = True
+        for param in model.student.dino_head.parameters():
+            param.requires_grad = True
+        model.student.backbone.pos_embed.requires_grad = True
 
+    model.prepare_for_distributed_training()
+    
 
     logger.info("Model:\n{}".format(model))
     if args.eval_only:
