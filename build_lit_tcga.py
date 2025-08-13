@@ -256,7 +256,7 @@ def tile_generator(slide_paths: List[str], config: TileConfig, tiles_per_mag: in
 def find_svs_files(root_dir: str, exclude_file: Optional[str] = None) -> List[str]:
     """Find all SVS files in directory tree, excluding bad files if specified."""
     root_path = Path(root_dir)
-    svs_files = list(root_path.rglob("*.svs"))
+    svs_files = list(root_path.rglob("*aa.svs")) 
     
     # Load exclusion list if provided
     excluded = set()
@@ -353,7 +353,7 @@ def main():
     parser.add_argument(
         "--input-dir",
         type=str,
-        default="/data/TCGA_test",
+        default="/data/TCGA",
         help="Input directory containing TCGA SVS files"
     )
     parser.add_argument(
