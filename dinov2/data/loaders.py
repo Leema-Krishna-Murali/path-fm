@@ -42,15 +42,13 @@ def _make_sample_transform(image_transform: Optional[Callable] = None, target_tr
 
 
 def _parse_dataset_str(dataset_str: str):
-
     tokens = dataset_str.split(":")
-
     name = tokens[0]
     kwargs = {}
 
     for token in tokens[1:]:
         key, value = token.split("=")
-        assert key in ("root", "extra", "split")
+        assert key in ("root", "extra", "split", "cache_gb", "patch_size")
         kwargs[key] = value
 
     if name == "ImageNet":
@@ -61,7 +59,15 @@ def _parse_dataset_str(dataset_str: str):
         class_ = ImageNet22k
     elif name.lower() == "pathology":
         class_ = SlideDataset
-        print("kwargs", kwargs)
+    elif name.lower() == "pathology_zarr":
+        # Import the new zarr dataset
+        from .datasets.slide_dataset_zarr import SlideDatasetZarr
+        class_ = SlideDatasetZarr
+        # Convert string parameters to appropriate types
+        if "cache_gb" in kwargs:
+            kwargs["cache_gb"] = float(kwargs["cache_gb"])
+        if "patch_size" in kwargs:
+            kwargs["patch_size"] = int(kwargs["patch_size"])
     else:
         raise ValueError(f'Unsupported dataset "{name}"')
 

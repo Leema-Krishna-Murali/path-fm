@@ -17,5 +17,16 @@ dependencies = [
     "submitit>=1.5.3",
     "torchmetrics>=1.8.0",
     "wandb>=0.21.0",
+    "zarr>=2.16",
+    "numcodecs>=0.12",
+    "fsspec>=2024.6.0",
+    "s3fs>=2024.6.0",
+    "tqdm>=4.66",
+    "boto3==1.40.8",
+    "botocore==1.40.8",
+    "s3transfer==0.13.1",
+    "pyvips==3.0.0",
+    "pycparser==2.22",
+    "cffi==1.17.1",
 ]
 
