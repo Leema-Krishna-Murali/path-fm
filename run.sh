@@ -43,7 +43,7 @@ echo "Using rclone config: $RCLONE_CONF"
 echo "R2 endpoint: $R2_ENDPOINT_URL"
 
 # Set paths and parameters
-S3_ROOT="s3://tcga-omezarr"
+S3_ROOT="s3://tcga-zarr"
 CACHE_GB=100.0  # Local cache size in GB
 PATCH_SIZE=224  # Patch size for training
 

@@ -1,9 +1,10 @@
+# dinov2/data/datasets/slide_dataset_zarr.py
 """
-Dataset following Midnight CPath paper specifications:
-- 256x256 tiles
-- Online patching from random positions
+Enhanced OME-Zarr dataset with Midnight CPath paper specifications:
+- Multi-resolution sampling (2, 1, 0.5, 0.25 µm/px)
+- HSV-based tissue filtering
 - 40% foreground threshold
-- HSV filtering for tissue detection
+- Online random patching
 """
 
 import os
@@ -12,40 +13,109 @@ import logging
 import hashlib
 import threading
 import time
+import numpy as np
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-import numpy as np
 from PIL import Image
 import zarr
 import fsspec
 import s3fs
-import cv2
+from skimage.color import rgb2hsv
 
 from .extended import ExtendedVisionDataset
 
 logger = logging.getLogger(__name__)
 
+# Suppress noisy logs
+for logger_name in ['aiobotocore.credentials', 'botocore.credentials', 's3fs']:
+    logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+
+class DirectR2Store:
+    """Direct-to-R2 Zarr store using FSStore."""
+    
+    def __init__(self, s3_path: str, cache_metadata: bool = True):
+        """
+        Args:
+            s3_path: Full S3 path to zarr store (s3://bucket/path)
+            cache_metadata: Whether to cache metadata locally
+        """
+        self.s3_path = s3_path
+        
+        # Setup S3 filesystem
+        self.fs = s3fs.S3FileSystem(
+            endpoint_url=os.environ.get("R2_ENDPOINT_URL"),
+            key=os.environ.get("AWS_ACCESS_KEY_ID"),
+            secret=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            use_ssl=True,
+            client_kwargs={
+                "connect_timeout": 30,
+                "read_timeout": 60,
+                "retries": {"max_attempts": 5, "mode": "adaptive"}
+            }
+        )
+        
+        # Create FSStore for direct R2 access
+        self.store = zarr.storage.FSStore(
+            self.s3_path,
+            fs=self.fs,
+            mode='r',
+            dimension_separator='/',
+            check=False
+        )
+        
+        # Open zarr group
+        self.group = zarr.open_group(self.store, mode='r')
+        
+        # Cache metadata if requested
+        self._metadata_cache = {} if cache_metadata else None
+        if cache_metadata:
+            self._cache_metadata()
+    
+    def _cache_metadata(self):
+        """Cache all metadata locally for faster access."""
+        try:
+            # Cache multiscales
+            self._metadata_cache['multiscales'] = self.group.attrs.get('multiscales', [])
+            
+            # Cache array info
+            self._metadata_cache['arrays'] = {}
+            for key in self.group.keys():
+                if not key.startswith('.'):
+                    arr = self.group[key]
+                    self._metadata_cache['arrays'][key] = {
+                        'shape': arr.shape,
+                        'chunks': arr.chunks,
+                        'dtype': str(arr.dtype)
+                    }
+        except Exception as e:
+            logger.warning(f"Failed to cache metadata: {e}")
+
+
 class SlideDatasetZarr(ExtendedVisionDataset):
     """
     OME-Zarr dataset with Midnight CPath paper specifications.
     
-    Paper specifications:
-    - Tile size: 256x256
-    - Resolutions: 2, 1, 0.5, and 0.25 µm/px
-    - Foreground threshold: 40%
-    - HSV filtering for tissue quality
+    Features:
+    - Multi-resolution sampling (2, 1, 0.5, 0.25 µm/px)
+    - HSV-based tissue filtering (≥60% pixels in specified ranges)
+    - 40% foreground area threshold
+    - 256×256 tile size
+    - Direct R2 streaming with intelligent caching
     """
     
     def __init__(
         self,
         root: str,
-        tile_size: int = 256,  # Midnight paper uses 256x256
-        foreground_threshold: float = 0.4,  # 40% as per paper
-        hsv_tissue_ratio: float = 0.6,  # 60% as per paper
+        tile_size: int = 256,  # Midnight uses 256×256
+        foreground_threshold: float = 0.4,  # 40% foreground
+        hsv_filter: bool = True,
+        hsv_ranges: Dict[str, Tuple[int, int]] = None,
+        target_mpp: List[float] = None,  # [2.0, 1.0, 0.5, 0.25] µm/px
         cache_gb: float = 1000.0,
-        preferred_resolutions: List[float] = None,
+        prefetch_workers: int = 4,
         *args,
         **kwargs
     ):
@@ -54,75 +124,63 @@ class SlideDatasetZarr(ExtendedVisionDataset):
         self.root = str(root)
         self.tile_size = tile_size
         self.foreground_threshold = foreground_threshold
-        self.hsv_tissue_ratio = hsv_tissue_ratio
-        
-        # Preferred resolutions (µm/px) as per Midnight paper
-        if preferred_resolutions is None:
-            self.preferred_resolutions = [0.25, 0.5, 1.0, 2.0]
-        else:
-            self.preferred_resolutions = preferred_resolutions
+        self.hsv_filter = hsv_filter
         
         # HSV ranges from Midnight paper
-        # Hue: [90, 180], Saturation: [8, 255], Value: [103, 255]
-        self.hsv_lower = np.array([90, 8, 103])
-        self.hsv_upper = np.array([180, 255, 255])
+        self.hsv_ranges = hsv_ranges or {
+            'hue': (90, 180),      # Hue range [90, 180]
+            'saturation': (8, 255),  # Saturation range [8, 255]
+            'value': (103, 255)     # Value range [103, 255]
+        }
         
-        # Setup caching
-        self.chunk_cache = ChunkCache(max_size_gb=cache_gb)
+        # Target microns per pixel (magnifications)
+        self.target_mpp = target_mpp or [2.0, 1.0, 0.5, 0.25]
         
-        # Setup S3 filesystem
-        self.fs = self._setup_s3fs()
-        
-        # Find all zarr stores
+        # Setup direct R2 access
         self.zarr_stores = self._find_zarr_stores()
-        
         if len(self.zarr_stores) == 0:
             raise ValueError(f"No zarr stores found in {self.root}")
         
-        logger.info(f"Found {len(self.zarr_stores)} zarr stores (Midnight mode)")
+        logger.info(f"Found {len(self.zarr_stores)} zarr stores")
+        logger.info(f"Target magnifications (µm/px): {self.target_mpp}")
+        logger.info(f"Tile size: {self.tile_size}×{self.tile_size}")
+        logger.info(f"HSV filtering: {self.hsv_filter}")
         
-        # Metadata cache
-        self.metadata_cache = {}
+        # Store handles cache
+        self._store_cache = {}
+        self._cache_lock = threading.Lock()
+        
+        # Prefetch executor
+        self.prefetch_executor = ThreadPoolExecutor(max_workers=prefetch_workers)
         
         # Statistics
-        self.accepted_tiles = 0
-        self.rejected_tiles = 0
-    
-    def _setup_s3fs(self) -> s3fs.S3FileSystem:
-        """Setup S3 filesystem with R2 configuration."""
-        endpoint = os.environ.get("R2_ENDPOINT_URL")
-        
-        client_kwargs = {
-            "endpoint_url": endpoint,
-            "connect_timeout": 30,
-            "read_timeout": 60,
-            "retries": {
-                "max_attempts": 5,
-                "mode": "adaptive"
-            }
-        } if endpoint else {}
-        
-        return s3fs.S3FileSystem(
-            anon=False,
-            client_kwargs=client_kwargs,
-            key=os.environ.get("AWS_ACCESS_KEY_ID"),
-            secret=os.environ.get("AWS_SECRET_ACCESS_KEY"),
-            use_ssl=True,
-            default_block_size=5*1024*1024,
-            config_kwargs={'max_pool_connections': 50}
-        )
+        self.stats = {
+            'tiles_extracted': 0,
+            'tiles_accepted': 0,
+            'tiles_rejected_foreground': 0,
+            'tiles_rejected_hsv': 0
+        }
     
     def _find_zarr_stores(self) -> List[str]:
         """Find all zarr stores in the S3 path."""
         stores = []
         
+        # Setup S3 filesystem
+        fs = s3fs.S3FileSystem(
+            endpoint_url=os.environ.get("R2_ENDPOINT_URL"),
+            key=os.environ.get("AWS_ACCESS_KEY_ID"),
+            secret=os.environ.get("AWS_SECRET_ACCESS_KEY")
+        )
+        
+        # Parse S3 path
         if not self.root.startswith("s3://"):
             raise ValueError(f"Root must be an S3 path, got: {self.root}")
         
         path_without_scheme = self.root.replace("s3://", "")
         
         try:
-            items = self.fs.find(path_without_scheme, maxdepth=None, withdirs=True)
+            # Find all .zarr directories
+            items = fs.find(path_without_scheme, maxdepth=None, withdirs=True)
             
             for item in items:
                 if item.endswith(".zarr/.zgroup"):
@@ -137,13 +195,75 @@ class SlideDatasetZarr(ExtendedVisionDataset):
             logger.error(f"Failed to list zarr stores: {e}")
             return []
     
-    def _check_foreground_ratio(self, tile: np.ndarray) -> bool:
+    def _get_store(self, store_path: str) -> DirectR2Store:
+        """Get or create a DirectR2Store for a zarr store."""
+        with self._cache_lock:
+            if store_path not in self._store_cache:
+                self._store_cache[store_path] = DirectR2Store(
+                    store_path, 
+                    cache_metadata=True
+                )
+            return self._store_cache[store_path]
+    
+    def _select_resolution_level(self, store: DirectR2Store) -> Optional[Tuple[str, float]]:
+        """
+        Select resolution level closest to target magnifications.
+        Returns (level_name, estimated_mpp).
+        """
+        if not store._metadata_cache:
+            return None
+        
+        arrays = store._metadata_cache.get('arrays', {})
+        if not arrays:
+            return None
+        
+        # Get multiscales metadata
+        multiscales = store._metadata_cache.get('multiscales', [])
+        if not multiscales:
+            # Fallback: use any available level
+            level_names = [k for k in arrays.keys() if not k.startswith('.')]
+            if level_names:
+                return (level_names[0], 1.0)
+            return None
+        
+        # Extract scale information
+        datasets = multiscales[0].get('datasets', [])
+        
+        # Choose random target magnification
+        target_mpp = random.choice(self.target_mpp)
+        
+        # Find closest level
+        best_level = None
+        best_diff = float('inf')
+        
+        for dataset in datasets:
+            path = dataset['path']
+            transforms = dataset.get('coordinateTransformations', [])
+            
+            # Extract scale factor
+            scale = 1.0
+            for transform in transforms:
+                if transform.get('type') == 'scale':
+                    # Assume scale is uniform in X/Y
+                    scale = transform['scale'][0] if len(transform['scale']) > 0 else 1.0
+            
+            # Estimate MPP (assuming base level is ~0.25 µm/px)
+            estimated_mpp = 0.25 * scale
+            
+            diff = abs(estimated_mpp - target_mpp)
+            if diff < best_diff:
+                best_diff = diff
+                best_level = (path, estimated_mpp)
+        
+        return best_level
+    
+    def _check_foreground(self, tile: np.ndarray) -> bool:
         """
         Check if tile has sufficient foreground (non-background) content.
-        Background is typically very bright (close to white).
+        Background is typically very bright (white).
         """
         # Convert to grayscale
-        gray = cv2.cvtColor(tile, cv2.COLOR_RGB2GRAY)
+        gray = np.mean(tile, axis=2)
         
         # Background is typically > 230 in grayscale
         foreground_mask = gray < 230
@@ -153,268 +273,150 @@ class SlideDatasetZarr(ExtendedVisionDataset):
     
     def _check_hsv_filter(self, tile: np.ndarray) -> bool:
         """
-        Apply HSV filter as per Midnight paper.
-        A tile is accepted if ≥60% of pixels have:
-        - Hue in [90, 180]
-        - Saturation in [8, 255]
-        - Value in [103, 255]
+        Apply HSV filter from Midnight paper.
+        Accept tile if ≥60% of pixels are in specified HSV ranges.
         """
-        # Convert to HSV
-        # OpenCV uses H: 0-179, S: 0-255, V: 0-255
-        # Paper uses H: 0-360, so we need to scale
-        hsv = cv2.cvtColor(tile, cv2.COLOR_RGB2HSV)
+        if not self.hsv_filter:
+            return True
         
-        # Scale hue values for OpenCV (paper range [90, 180] in 360 scale)
-        # In OpenCV scale (0-179): [45, 90]
-        hsv_lower_cv = np.array([45, 8, 103])
-        hsv_upper_cv = np.array([90, 255, 255])
+        # Convert to HSV (values in [0,1])
+        hsv = rgb2hsv(tile / 255.0)
         
-        # Create mask for pixels within the range
-        mask = cv2.inRange(hsv, hsv_lower_cv, hsv_upper_cv)
+        # Convert to degrees/255 scale
+        h = hsv[:, :, 0] * 180  # Hue in [0, 180]
+        s = hsv[:, :, 1] * 255  # Saturation in [0, 255]
+        v = hsv[:, :, 2] * 255  # Value in [0, 255]
         
-        # Calculate ratio of pixels within range
-        tissue_ratio = np.sum(mask > 0) / (tile.shape[0] * tile.shape[1])
+        # Check if pixels are in specified ranges
+        mask = (
+            (h >= self.hsv_ranges['hue'][0]) & (h <= self.hsv_ranges['hue'][1]) &
+            (s >= self.hsv_ranges['saturation'][0]) & (s <= self.hsv_ranges['saturation'][1]) &
+            (v >= self.hsv_ranges['value'][0]) & (v <= self.hsv_ranges['value'][1])
+        )
         
-        return tissue_ratio >= self.hsv_tissue_ratio
+        # Calculate percentage of pixels in range
+        pixels_in_range = np.mean(mask)
+        
+        return pixels_in_range >= 0.6  # 60% threshold
     
-    def _is_valid_tile(self, tile: np.ndarray) -> bool:
+    def _extract_random_tile(self, store_path: str) -> Optional[np.ndarray]:
         """
-        Check if tile passes all quality filters:
-        1. Sufficient foreground (40%)
-        2. HSV tissue filter (60% pixels in range)
-        """
-        # Check foreground ratio
-        if not self._check_foreground_ratio(tile):
-            return False
-        
-        # Check HSV filter
-        if not self._check_hsv_filter(tile):
-            return False
-        
-        return True
-    
-    def _get_random_tile(self, store_path: str) -> Optional[np.ndarray]:
-        """
-        Extract a random tile following Midnight paper's online patching.
-        Samples uniformly at random from arbitrary positions.
+        Extract a random tile following Midnight paper specifications.
         """
         try:
-            # Get metadata
-            metadata = self._get_store_metadata(store_path)
-            if not metadata or not metadata.get('levels'):
+            store = self._get_store(store_path)
+            
+            # Select resolution level
+            level_info = self._select_resolution_level(store)
+            if not level_info:
                 return None
             
-            # Choose resolution level based on paper's preferences
-            available_levels = metadata['levels'].keys()
+            level_name, estimated_mpp = level_info
             
-            # Try to find levels matching paper's resolutions
-            selected_level = None
-            for pref_res in self.preferred_resolutions:
-                level_name = f"res_{pref_res:.2f}um"
-                if level_name in available_levels:
-                    selected_level = level_name
-                    break
+            # Get array
+            arr = store.group[level_name]
+            shape = arr.shape
             
-            # Fallback to any available level
-            if selected_level is None:
-                selected_level = list(available_levels)[0]
-            
-            level_info = metadata['levels'][selected_level]
-            shape = level_info['shape']
-            h, w = shape[0], shape[1]
-            
-            if h < self.tile_size or w < self.tile_size:
+            # Assuming shape is (height, width, channels) or (channels, height, width)
+            if len(shape) == 3:
+                if shape[0] <= 4:  # Channels first
+                    h, w = shape[1], shape[2]
+                    channel_axis = 0
+                else:  # Channels last
+                    h, w = shape[0], shape[1]
+                    channel_axis = 2
+            else:
                 return None
             
-            # Open array with caching
-            store_id = hashlib.md5(store_path.encode()).hexdigest()[:8]
-            mapper = fsspec.get_mapper(
-                f"{store_path}/{selected_level}",
-                anon=False,
-                client_kwargs={"endpoint_url": os.environ.get("R2_ENDPOINT_URL")}
-            )
-            cached_store = CachedZarrStore(mapper, self.chunk_cache, store_id)
-            arr = zarr.open_array(cached_store, mode='r')
+            ts = self.tile_size
             
-            # Online patching: try multiple random positions
-            max_attempts = 20  # More attempts to find good tiles
+            if h < ts or w < ts:
+                return None
+            
+            # Try multiple times to find a valid tile
+            max_attempts = 20  # More attempts for stricter filtering
             
             for attempt in range(max_attempts):
-                # Sample uniformly at random position
-                y = random.randint(0, h - self.tile_size)
-                x = random.randint(0, w - self.tile_size)
+                # Random position (uniform sampling)
+                y = random.randint(0, h - ts)
+                x = random.randint(0, w - ts)
                 
                 # Extract tile
-                tile = np.asarray(
-                    arr[y:y+self.tile_size, x:x+self.tile_size, :],
-                    dtype=np.uint8
-                )
-                
-                # Check if tile passes quality filters
-                if self._is_valid_tile(tile):
-                    self.accepted_tiles += 1
-                    return tile
+                if channel_axis == 0:
+                    tile_data = arr[:3, y:y+ts, x:x+ts]
+                    tile = np.transpose(tile_data, (1, 2, 0))
                 else:
-                    self.rejected_tiles += 1
+                    tile = arr[y:y+ts, x:x+ts, :3]
+                
+                tile = np.asarray(tile, dtype=np.uint8)
+                
+                self.stats['tiles_extracted'] += 1
+                
+                # Check foreground threshold
+                if not self._check_foreground(tile):
+                    self.stats['tiles_rejected_foreground'] += 1
+                    continue
+                
+                # Check HSV filter
+                if not self._check_hsv_filter(tile):
+                    self.stats['tiles_rejected_hsv'] += 1
+                    continue
+                
+                # Tile accepted
+                self.stats['tiles_accepted'] += 1
+                
+                # Log statistics periodically
+                if self.stats['tiles_extracted'] % 100 == 0:
+                    self._log_stats()
+                
+                return tile
             
-            # If no valid tile found after max_attempts, return None
+            # No valid tile found after max attempts
             return None
             
         except Exception as e:
-            logger.error(f"Failed to get tile from {store_path}: {e}")
+            logger.error(f"Failed to extract tile from {store_path}: {e}")
             return None
     
-    def _get_store_metadata(self, store_path: str) -> Dict[str, Any]:
-        """Get metadata for a zarr store."""
-        if store_path in self.metadata_cache:
-            return self.metadata_cache[store_path]
-        
-        try:
-            mapper = fsspec.get_mapper(
-                store_path,
-                anon=False,
-                client_kwargs={"endpoint_url": os.environ.get("R2_ENDPOINT_URL")}
-            )
+    def _log_stats(self):
+        """Log extraction statistics."""
+        total = self.stats['tiles_extracted']
+        if total > 0:
+            accept_rate = self.stats['tiles_accepted'] / total
+            fg_reject_rate = self.stats['tiles_rejected_foreground'] / total
+            hsv_reject_rate = self.stats['tiles_rejected_hsv'] / total
             
-            group = zarr.open_group(mapper, mode='r')
-            
-            multiscales = group.attrs.get('multiscales', [])
-            if not multiscales:
-                return {}
-            
-            metadata = {
-                'multiscales': multiscales[0],
-                'levels': {}
-            }
-            
-            # Get info for each level
-            for dataset in multiscales[0].get('datasets', []):
-                level_path = dataset['path']
-                if level_path in group:
-                    arr = group[level_path]
-                    metadata['levels'][level_path] = {
-                        'shape': arr.shape,
-                        'chunks': arr.chunks,
-                        'dtype': str(arr.dtype),
-                        'resolution': dataset.get('resolution_um_px', None)
-                    }
-            
-            self.metadata_cache[store_path] = metadata
-            return metadata
-            
-        except Exception as e:
-            logger.warning(f"Failed to get metadata for {store_path}: {e}")
-            return {}
+            logger.info(f"Tile extraction stats: "
+                       f"Accepted: {accept_rate:.2%}, "
+                       f"Rejected (foreground): {fg_reject_rate:.2%}, "
+                       f"Rejected (HSV): {hsv_reject_rate:.2%}")
     
     def __len__(self) -> int:
-        return len(self.zarr_stores)
+        # Return a large number for online patching
+        # Each epoch will sample this many tiles
+        return len(self.zarr_stores) * 1000  # Adjust multiplier as needed
     
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         """
-        Get item following Midnight paper's approach.
+        Get a tile with online random patching as in Midnight paper.
         Returns (augmented_dict, None) for DINOv2 training.
         """
-        # Try multiple stores if needed to get a valid tile
-        max_store_attempts = 5
+        # Select random store (WSI)
+        store_idx = random.randint(0, len(self.zarr_stores) - 1)
+        store_path = self.zarr_stores[store_idx]
         
-        for store_attempt in range(max_store_attempts):
-            # Select a random store (online patching from arbitrary WSIs)
-            store_idx = random.randint(0, len(self.zarr_stores) - 1)
-            store_path = self.zarr_stores[store_idx]
-            
-            # Get random tile with quality filtering
-            tile = self._get_random_tile(store_path)
-            
-            if tile is not None:
-                # Convert to PIL Image
-                img = Image.fromarray(tile, mode='RGB')
-                
-                # Apply DINOv2 augmentations
-                if self.transforms is not None:
-                    return self.transforms(img), None
-                else:
-                    raise RuntimeError("SlideDatasetZarr requires DataAugmentationDINO transform")
+        # Extract random tile with filtering
+        tile = self._extract_random_tile(store_path)
         
-        # If no valid tile found, return a dummy tile
-        # This should be rare with proper data
-        logger.warning(f"Could not find valid tile after {max_store_attempts} attempts")
-        dummy_tile = np.ones((self.tile_size, self.tile_size, 3), dtype=np.uint8) * 255
-        img = Image.fromarray(dummy_tile, mode='RGB')
+        if tile is None:
+            # Fallback: create dummy tile
+            tile = np.ones((self.tile_size, self.tile_size, 3), dtype=np.uint8) * 255
         
+        # Convert to PIL Image
+        img = Image.fromarray(tile, mode='RGB')
+        
+        # Apply DINOv2 augmentations
         if self.transforms is not None:
             return self.transforms(img), None
-        else:
-            raise RuntimeError("SlideDatasetZarr requires DataAugmentationDINO transform")
-    
-    def log_stats(self):
-        """Log tile acceptance statistics."""
-        total = self.accepted_tiles + self.rejected_tiles
-        if total > 0:
-            accept_rate = self.accepted_tiles / total
-            logger.info(f"Tile stats - Accepted: {self.accepted_tiles}, "
-                       f"Rejected: {self.rejected_tiles}, "
-                       f"Accept rate: {accept_rate:.2%}")
-
-
-class ChunkCache:
-    """LRU cache for Zarr chunks."""
-    
-    def __init__(self, max_size_gb: float = 1000.0):
-        self.max_size_bytes = int(max_size_gb * 1024**3)
-        self.cache = OrderedDict()
-        self.size_map = {}
-        self.current_size = 0
-        self.lock = threading.Lock()
-        self.hits = 0
-        self.misses = 0
-    
-    def get(self, key: str) -> Optional[bytes]:
-        with self.lock:
-            if key in self.cache:
-                self.cache.move_to_end(key)
-                self.hits += 1
-                return self.cache[key]
-            self.misses += 1
-            return None
-    
-    def put(self, key: str, value: bytes):
-        size = len(value)
         
-        with self.lock:
-            if key in self.cache:
-                self.current_size -= self.size_map[key]
-                del self.cache[key]
-                del self.size_map[key]
-            
-            while self.current_size + size > self.max_size_bytes and self.cache:
-                evict_key, _ = self.cache.popitem(last=False)
-                self.current_size -= self.size_map[evict_key]
-                del self.size_map[evict_key]
-            
-            self.cache[key] = value
-            self.size_map[key] = size
-            self.current_size += size
-
-
-class CachedZarrStore:
-    """Zarr store wrapper with chunk caching."""
-    
-    def __init__(self, base_store, cache: ChunkCache, store_id: str):
-        self.base_store = base_store
-        self.cache = cache
-        self.store_id = store_id
-    
-    def __getitem__(self, key):
-        cache_key = f"{self.store_id}:{key}"
-        cached = self.cache.get(cache_key)
-        if cached is not None:
-            return cached
-        value = self.base_store[key]
-        self.cache.put(cache_key, value)
-        return value
-    
-    def __contains__(self, key):
-        return key in self.base_store
-    
-    def keys(self):
-        return self.base_store.keys()
+        raise RuntimeError("SlideDatasetZarr requires DataAugmentationDINO transform")

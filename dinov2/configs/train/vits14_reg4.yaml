@@ -31,3 +31,10 @@ optim:
   layerwise_decay: 1.0
 crops:
   local_crops_size: 98
+
+# crops:
+#   global_crops_size: 256  # Changed from 224 to 256
+#   local_crops_size: 128   # Adjusted proportionally
+#   local_crops_scale:
+#   - 0.05
+#   - 0.32
