@@ -9,10 +9,12 @@ ibot:
   separate_head: true
   head_n_prototypes: 131072
 train:
+  OFFICIAL_EPOCH_LENGTH: 100 #1250
   batch_size_per_gpu: 32
     #  dataset_path: ImageNet22k
   centering: sinkhorn_knopp
     # use_pretrained: True
+  num_workers: 1  # Reduced to 1 to avoid S3 async issues
 student:
   arch: vit_small
   patch_size: 14
@@ -24,7 +26,7 @@ student:
 teacher:
   momentum_teacher: 0.994
 optim:
-  epochs: 50000
+  epochs: 50 #50000
   weight_decay_end: 0.2
   base_lr: 2.0e-04  # learning rate for a batch size of 1024
     #warmup_epochs: 80
