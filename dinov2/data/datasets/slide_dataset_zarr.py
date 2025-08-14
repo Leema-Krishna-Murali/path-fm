@@ -56,7 +56,6 @@ class ChunkCacheStore:
     
     def _get_chunk_cache_path(self, key: str) -> Path:
         """Get local cache path for a chunk key"""
-        # Zarr chunk keys look like: "level0/0.0.0" or "level0/.zarray"
         safe_key = key.replace("/", "_")
         return self.cache_dir / safe_key
     
@@ -318,6 +317,7 @@ class SlideDatasetZarr(ExtendedVisionDataset):
             self._metadata_cache = {}
             
         else:
+            err
             # Local filesystem - no caching needed
             self.cache = None
             p = Path(self.root)
@@ -326,6 +326,7 @@ class SlideDatasetZarr(ExtendedVisionDataset):
         logger.info(f"[Zarr] stores found: {len(self.groups)}")
         
         if len(self.groups) == 0:
+            err
             logger.warning(f"No zarr stores found in {self.root}")
             # Create a dummy entry to prevent crashes
             self._use_dummy = True
@@ -370,6 +371,7 @@ class SlideDatasetZarr(ExtendedVisionDataset):
     def __len__(self) -> int:
         # Always return a valid length, even if no data
         if self._use_dummy or len(self.groups) == 0:
+            err
             return 1
         return len(self.groups)
     
@@ -389,6 +391,7 @@ class SlideDatasetZarr(ExtendedVisionDataset):
         """
         # Return dummy sample if no data
         if self._use_dummy or len(self.groups) == 0:
+            err
             return self._get_dummy_sample()
         
         # Safe modulo to prevent division by zero
