@@ -7,3 +7,4 @@ from .image_net import ImageNet
 from .image_net_22k import ImageNet22k
 from .test_data import TestVisionDataset
 from .slide_dataset import SlideDataset
+from .slide_dataset_zarr import SlideDatasetZarr

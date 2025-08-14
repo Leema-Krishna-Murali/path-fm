@@ -14,7 +14,7 @@ train:
     #  dataset_path: ImageNet22k
   centering: sinkhorn_knopp
     # use_pretrained: True
-  num_workers: 1  # Reduced to 1 to avoid S3 async issues
+  num_workers: 8
 student:
   arch: vit_small
   patch_size: 14

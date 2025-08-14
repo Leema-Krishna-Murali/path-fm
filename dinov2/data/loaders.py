@@ -42,14 +42,19 @@ def _make_sample_transform(image_transform: Optional[Callable] = None, target_tr
 
 
 def _parse_dataset_str(dataset_str: str):
-    tokens = dataset_str.split(":")
-    name = tokens[0]
+    # Split on first colon to separate dataset name from parameters
+    parts = dataset_str.split(":", 1)
+    name = parts[0]
     kwargs = {}
-
-    for token in tokens[1:]:
-        key, value = token.split("=")
-        assert key in ("root", "extra", "split", "cache_gb", "patch_size")
-        kwargs[key] = value
+    
+    if len(parts) > 1:
+        # Parse parameters, being careful about URLs that contain colons
+        param_str = parts[1]
+        # Split on comma or other delimiter if multiple params, but for now handle single param
+        if "=" in param_str:
+            key, value = param_str.split("=", 1)  # Split only on first =
+            assert key in ("root", "extra", "split", "cache_gb", "patch_size")
+            kwargs[key] = value
 
     if name == "ImageNet":
         class_ = ImageNet
@@ -58,16 +63,11 @@ def _parse_dataset_str(dataset_str: str):
     elif name == "ImageNet22k":
         class_ = ImageNet22k
     elif name.lower() == "pathology":
-        class_ = SlideDataset
-    elif name.lower() == "pathology_zarr":
-        # Import the new zarr dataset
+        err
+        # class_ = SlideDataset
+    elif "zarr" in name.lower():
         from .datasets.slide_dataset_zarr import SlideDatasetZarr
         class_ = SlideDatasetZarr
-        # Convert string parameters to appropriate types
-        if "cache_gb" in kwargs:
-            kwargs["cache_gb"] = float(kwargs["cache_gb"])
-        if "patch_size" in kwargs:
-            kwargs["patch_size"] = int(kwargs["patch_size"])
     else:
         raise ValueError(f'Unsupported dataset "{name}"')
 
