@@ -214,7 +214,7 @@ def do_train(cfg, model, resume=False):
         num_workers=cfg.train.num_workers,
         #num_workers = 1,
         shuffle=True,
-        seed=start_iter,  # TODO: Fix this -- cfg.train.seed
+        seed=0,
         sampler_type=sampler_type,
         sampler_advance=0,  # TODO(qas): fix this -- start_iter * cfg.train.batch_size_per_gpu,
         drop_last=True,
@@ -230,7 +230,7 @@ def do_train(cfg, model, resume=False):
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
 
-    
+    import time
     for data in metric_logger.log_every(
         data_loader,
         10,
@@ -238,14 +238,20 @@ def do_train(cfg, model, resume=False):
         max_iter,
         start_iter,
     ):
+        start = time.time() 
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+
+        
         current_batch_size = data["collated_global_crops"].shape[0] / 2
         if iteration > max_iter:
             return
         
-        if iteration >= 6500:
+        if iteration == 5010:
             for param in model.parameters():
                 param.requires_grad = True
-
+        
         # apply schedules
 
         lr = lr_schedule[iteration]
@@ -311,7 +317,15 @@ def do_train(cfg, model, resume=False):
 
         
         # checkpointing and testing
-
+        
+        end_event.record()
+    
+        # Synchronize the GPU to ensure all operations are complete before measuring
+        torch.cuda.synchronize()
+        # Calculate and print the elapsed time
+        elapsed_ms = start_event.elapsed_time(end_event)
+#        print(f"Time elapsed for matmul: {elapsed_ms:.2f} ms")
+        
         #Save instantly
         if cfg.evaluation.eval_period_iterations >= 0 and (iteration) % cfg.evaluation.eval_period_iterations == 0:
             do_test(cfg, model, f"training_{iteration}")
@@ -319,6 +333,8 @@ def do_train(cfg, model, resume=False):
         periodic_checkpointer.step(iteration)
 
         iteration = iteration + 1
+        end = time.time()
+        print(end - start)
     metric_logger.synchronize_between_processes()
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
@@ -329,9 +345,10 @@ def main(args):
     model = SSLMetaArch(cfg).to(torch.device("cuda"))
     #Load model here from pretrained.
     if True:#cfg.train.use_pretrained and "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
-        print("load small")
+        print("load giant") 
+#        model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
         
-        model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
+        model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitg14_reg')
         model_pretrained = model_pretrained.to(torch.device("cuda"))
         model.student.backbone.patch_embed.proj.weight = model_pretrained.patch_embed.proj.weight
         model.student.backbone.patch_embed.proj.bias = model_pretrained.patch_embed.proj.bias
@@ -362,28 +379,48 @@ def main(args):
                     sublayer.norm1.bias = current.norm1.bias
                     
                     sublayer.attn.qkv.weight = current.attn.qkv.weight
-                    sublayer.attn.qkv.bias=  current.attn.qkv.bias
+                    #
+                    sublayer.attn.qkv.bias =  current.attn.qkv.bias
 
                     sublayer.attn.proj.weight = current.attn.proj.weight
+                    
+                    #
                     sublayer.attn.proj.bias = current.attn.proj.bias
 
 
                     sublayer.norm2.weight = current.norm2.weight
-                    sublayer.norm2.bias = current.norm2.bias
-
-                    sublayer.mlp.fc1.weight = current.mlp.fc1.weight
-                    sublayer.mlp.fc2.weight = current.mlp.fc2.weight
                     
-                    sublayer.mlp.fc1.bias = current.mlp.fc1.bias
-                    sublayer.mlp.fc2.bias = current.mlp.fc2.bias
+                    #
+                    sublayer.norm2.bias = current.norm2.bias
+                    try:
+                        sublayer.mlp.fc1.weight = current.mlp.fc1.weight
+                        sublayer.mlp.fc2.weight = current.mlp.fc2.weight
+                        sublayer.mlp.fc1.bias = current.mlp.fc1.bias
+                        sublayer.mlp.fc2.bias = current.mlp.fc2.bias
+                    except:
+                        sublayer.mlp.w12.weight = current.mlp.w12.weight
+                        sublayer.mlp.w12.bias = current.mlp.w12.bias
+
+                        sublayer.mlp.w3.weight = current.mlp.w3.weight
+                        sublayer.mlp.w3.bias = current.mlp.w3.bias
+                        
+
+
 
                     sublayer.ls1.gamma = current.ls1.gamma
                     sublayer.ls2.gamma = current.ls2.gamma
 
+
         model.student.backbone.norm.weight = model_pretrained.norm.weight
+        
+        #
         model.student.backbone.norm.bias = model_pretrained.norm.bias 
 
-    if True:#partial freeze
+        #The temp sucess was norm bias off.
+    
+    #What we are going to try right now is freezing everything *Except* position embeddings and new params
+    model.prepare_for_distributed_training()
+    if True:#Test partial freeze
         for param in model.parameters():
             param.requires_grad = False
         for param in model.student.ibot_head.parameters():
@@ -392,10 +429,8 @@ def main(args):
             param.requires_grad = True
         model.student.backbone.pos_embed.requires_grad = True
 
-    model.prepare_for_distributed_training()
-    
-
     logger.info("Model:\n{}".format(model))
+
     if args.eval_only:
         iteration = (
             FSDPCheckpointer(model, save_dir=cfg.train.output_dir)
