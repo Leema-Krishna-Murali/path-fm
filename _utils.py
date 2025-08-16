@@ -35,6 +35,8 @@ def load_model_weights(model: nn.Module, checkpoint_path: str) -> None:
         
 
         if "teacher" in checkpoint:
+            print("loading pretrained")
+
             checkpoint = checkpoint["teacher"]
             #Need to remove the word backbone from everything I think?
             checkpoint_new = {}
@@ -45,7 +47,7 @@ def load_model_weights(model: nn.Module, checkpoint_path: str) -> None:
                 checkpoint_new[keyb] = checkpoint[key]
 
             checkpoint = checkpoint_new
-            #The pos embed is the only different one, idk why
+            #The pos embed is the only different one
             new_shape = checkpoint["pos_embed"]
             model.pos_embed = torch.nn.parameter.Parameter(new_shape)
 
