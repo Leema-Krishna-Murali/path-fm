@@ -18,4 +18,3 @@ dependencies = [
     "torchmetrics>=1.8.0",
     "wandb>=0.21.0",
 ]
-
