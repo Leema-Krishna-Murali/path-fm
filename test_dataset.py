@@ -5,7 +5,6 @@ import random
 dataset = SlideDataset("/data/TCGA")
 
 
-
 def hsv(tile_rgb, patch_size):
 
     tile = np.array(tile_rgb)
@@ -31,10 +30,12 @@ i = 0
 finish = 3072 * 1000000
 
 tries = 0
+datas = dataset.image_files_svs
 for e in range(0, finish):
-    for i in range(0, dataset.__len__()):
+    for i in range(0, len(datas)):
         #item = dataset.__getitem__(i)
-        image, path = dataset.get_all(i)
+        path = datas[i]
+        image = OpenSlide(path)
     
         patch_size = 224
         #radomly pick level, read region
@@ -49,8 +50,6 @@ for e in range(0, finish):
                 tries += 1   
                 x = random.randint(0, width - patch_size)
                 y = random.randint(0, height - patch_size)
-
-                print("tying", tries)
                 patch = image.read_region((x, y), level = level, size=(224, 224))
                 res = hsv(patch, (224,224))
                 if res == None:
@@ -62,7 +61,5 @@ for e in range(0, finish):
                     print(path, x, y, level, flush = True)
                     break
                 
-
-
 
 print("done")
