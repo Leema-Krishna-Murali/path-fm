@@ -148,11 +148,49 @@ def do_train(cfg, model, resume=False):
     ) = build_schedulers(cfg)
     
     from omegaconf import OmegaConf
+    import subprocess
+    import tempfile
+    
+    def log_codebase_to_wandb():
+        """Log the entire codebase as a text file to wandb using Flatty"""
+        try:
+            # Run flatty to generate codebase text
+            result = subprocess.run(
+                ["/home/paul/bin/flatty"],
+                cwd="/home/paul/path-fm",
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            if result.returncode == 0:
+                codebase_text = result.stdout
+                # Create a temporary file with the codebase content
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                    f.write(codebase_text)
+                    temp_path = f.name
+                
+                # Log as wandb artifact
+                artifact = wandb.Artifact('codebase-snapshot', type='code')
+                artifact.add_file(temp_path, name='codebase.txt')
+                wandb.log_artifact(artifact)
+                
+                # Clean up temp file
+                os.unlink(temp_path)
+                logger.info("Codebase successfully logged to wandb")
+            else:
+                logger.warning(f"Flatty failed with return code {result.returncode}: {result.stderr}")
+        except Exception as e:
+            logger.warning(f"Failed to log codebase to wandb: {e}")
+    
     if distributed.is_main_process():
         run = wandb.init(
             project="midnight-rep",  # Specify your project
             config = OmegaConf.to_container(cfg)
         )
+        
+        # Log codebase snapshot once at the start of training
+        log_codebase_to_wandb()
 
 
 

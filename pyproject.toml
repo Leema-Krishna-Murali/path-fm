@@ -42,3 +42,6 @@ xformers = { index = "pytorch-cu128" }
 
 [tool.setuptools.packages.find]
 include = ["dinov2*"]
+
+[tool.setuptools]
+script-files = ["scripts/flatty.sh"]
