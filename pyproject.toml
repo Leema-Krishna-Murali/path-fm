@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "pathologydino"
 version = "0.1.0"
@@ -5,6 +9,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = "==3.10.12"
 dependencies = [
+    "torch==2.8.0",
+    "torchvision>=0.22.1",
+    "torchaudio>=2.7.1",
     "einops>=0.8.1",
     "fvcore>=0.1.5.post20221221",
     "iopath>=0.1.10",
@@ -17,5 +24,21 @@ dependencies = [
     "submitit>=1.5.3",
     "torchmetrics>=1.8.0",
     "wandb>=0.21.0",
+    "kaiko-eva[vision]>=0.3.3",
+    "xformers==0.0.32.post1",
+    "litdata",
 ]
 
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+xformers = { index = "pytorch-cu128" }
+
+[tool.setuptools.packages.find]
+include = ["dinov2*"]

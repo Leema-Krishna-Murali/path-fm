@@ -205,8 +205,14 @@ def do_train(cfg, model, resume=False):
         # {'image': <PIL.Image.Image image mode=RGB size=256x256 at 0x7F0ADC361AE0>, 'slide_path': '/data/TCGA/8cf05aac-ecc7-4437-8f14-6ffc21fdba88/TCGA-12-0775-01Z-00-DX1.39db447e-3a48-4001-89c4-4925a2d059aa.svs', 'position': (np.int64(36102), np.int64(14477)), 'level': np.int64(0), 'magnification': np.float64(1.0), 'slide_id': 'TCGA-12-0775-01Z-00-DX1.39db447e-3a48-4001-89c4-4925a2d059aa'}
         transformed = data_transform(item['image'])
         return (transformed, None)  
+
+    storage_options = {
+        "endpoint_url": os.environ.get("AWS_ENDPOINT_URL"),
+        "aws_access_key_id": os.environ.get("AWS_ACCESS_KEY_ID"),
+        "aws_secret_access_key": os.environ.get("AWS_SECRET_ACCESS_KEY"),
+    }
     
-    dataset = ld.StreamingDataset('/data/litTCGA', shuffle=True, drop_last=True, transform=extract_and_transform)
+    dataset = ld.StreamingDataset('s3://sophont/paul/data/litTCGA', storage_options=storage_options, shuffle=True, drop_last=True, transform=extract_and_transform)
     data_loader = ld.StreamingDataLoader(dataset, collate_fn=collate_fn)
 
     # training loop
