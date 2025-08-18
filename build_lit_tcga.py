@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import List, Tuple, Dict, Optional, Any, Set
 from dataclasses import dataclass, asdict
 from urllib.parse import urlparse
-from tqdm import tqdm
 import multiprocessing as mp
 
 import numpy as np
@@ -23,6 +22,7 @@ from PIL import Image
 import openslide
 from openslide import OpenSlide
 import boto3  
+from botocore.client import BaseClient
 from botocore.exceptions import ClientError
 from litdata import optimize
 from functools import partial
@@ -33,11 +33,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-
-def _identity_fn(tile_data):
-    """Identity function for LitData optimization - returns data as-is."""
-    return tile_data
 
 
 @dataclass
@@ -206,7 +201,6 @@ class TileExtractor:
         
         # Extract tiles for each magnification
         for target_mag, level in mag_map.items():
-            level_dims = slide.level_dimensions[level]
             downsample = slide.level_downsamples[level]
             
             # Tile size in level 0 coordinates corresponds to the physical area we want to capture
@@ -276,7 +270,7 @@ class TileExtractor:
                 tiles_data.append(tile_data)
                 n_extracted += 1
                 
-            # logger.info(f"Extracted {n_extracted} tiles at {target_mag} μm/px from {Path(slide_path).name}")
+            logger.debug(f"Extracted {n_extracted} tiles at {target_mag} μm/px from {Path(slide_path).name}")
         
         slide.close()
         return tiles_data
@@ -297,7 +291,7 @@ def find_svs_files(root_dir: str, exclude_file: Optional[str] = None) -> List[st
     logger.info(f"Found {len(valid_files)} total valid SVS files.")
     return valid_files
 
-def get_processed_slides(s3_client: boto3.client, bucket: str, key: str) -> Set[str]:
+def get_processed_slides(s3_client: BaseClient, bucket: str, key: str) -> Set[str]:
     """Reads the list of processed slides from the log file in S3."""
     try:
         response = s3_client.get_object(Bucket=bucket, Key=key)
@@ -313,7 +307,7 @@ def get_processed_slides(s3_client: boto3.client, bucket: str, key: str) -> Set[
             logger.error(f"Error reading log file from S3: {e}")
             raise
 
-def update_processed_slides(s3_client: boto3.client, bucket: str, key: str, all_processed_paths: Set[str]):
+def update_processed_slides(s3_client: BaseClient, bucket: str, key: str, all_processed_paths: Set[str]):
     """Writes the updated list of processed slides to the log file in S3."""
     logger.info(f"Updating log file with {len(all_processed_paths)} total processed slides.")
     content = "\n".join(sorted(list(all_processed_paths)))
@@ -366,31 +360,51 @@ def create_litdata_dataset(
     
     logger.info("Starting LitData optimization (slide list + per-slide extractor)...")
 
-    optimize(
-        fn=partial(_extract_tiles_fn, config=config, tiles_per_mag=tiles_per_mag),
-        inputs=slides_to_process,               
-        output_dir=output_dir,
-        num_workers=num_workers,
-        chunk_bytes="128MB",
-        mode="overwrite",
-    )
+    # Decide mode: first successful run uses overwrite, later runs append
+    mode = "overwrite" if not already_processed else "append"
 
-    logger.info("Dataset optimization for the current batch completed successfully.")
+    # OPTIONAL: batch slides to reduce blast radius on failure (e.g., 200 slides per call)
+    batch_size = 200
+    batches = [slides_to_process[i:i+batch_size] for i in range(0, len(slides_to_process), batch_size)]
+
+    for i, batch in enumerate(batches):
+        # first batch of a brand new dataset: overwrite; otherwise append
+        batch_mode = "overwrite" if (mode == "overwrite" and i == 0) else "append"
+        
+        try:
+            optimize(
+                fn=partial(_extract_tiles_fn, config=config, tiles_per_mag=tiles_per_mag),
+                inputs=batch,
+                output_dir=output_dir,
+                num_workers=num_workers,
+                chunk_bytes="128MB",
+                keep_data_ordered=False,   # helps avoid end-of-run stalls
+                mode=batch_mode,
+            )
+        except Exception as e:
+            # Do NOT update logs/metadata on failure; leave state consistent so you can resume
+            logger.exception(f"Batch {i} failed before finalization; no progress recorded for this batch.")
+            raise
+
+        newly = set(map(os.path.abspath, batch))
+        fully_processed = already_processed.union(newly)
+        update_processed_slides(s3_client, log_bucket, log_key, set(map(str, fully_processed)))
+        already_processed = fully_processed
     
-    # Only update the log file after the optimize step is fully successful.
-    newly_processed_set = set(map(norm, slides_to_process))
-    fully_processed_set = already_processed.union(newly_processed_set)
-    update_processed_slides(s3_client, log_bucket, log_key, set(map(str, fully_processed_set)))
-    
-    metadata = {
-        'num_slides': len(fully_processed_set), 'tiles_per_magnification': tiles_per_mag,
-        'magnifications': config.magnifications, 'tile_size': config.tile_size
-    }
-    metadata_key = f"{prefix}metadata.json"
-    s3_client.put_object(Bucket=log_bucket, Key=metadata_key, Body=json.dumps(metadata, indent=2))
-    
+        metadata = {
+            "num_slides": len(fully_processed),
+            "tiles_per_magnification": tiles_per_mag,
+            "magnifications": config.magnifications,
+            "tile_size": config.tile_size,
+            "last_updated": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+            "batch_index": i,
+            "total_batches": len(batches),
+        }
+        metadata_key = f"{prefix}metadata.json"
+        s3_client.put_object(Bucket=log_bucket, Key=metadata_key, Body=json.dumps(metadata, indent=2))
+        logger.info(f"Batch {i} committed. Processed slides so far: {len(fully_processed)}")
+
     logger.info("Processing finished.")
-
 
 def main():
     parser = argparse.ArgumentParser(description="Convert TCGA SVS dataset to LitData format, saving to local or S3 storage.")
@@ -409,7 +423,7 @@ def main():
     parser.add_argument(
         "--tiles-per-mag",
         type=int,
-        default=2, #8445 for approximately 384 million tiles (8445 = 384M / (#_of_slides x #_of_levels))
+        default=1, #8445 for approximately 384 million tiles (8445 = 384M / (#_of_slides x #_of_levels))
         help="Number of tiles to extract per magnification level"
     )
     parser.add_argument(
