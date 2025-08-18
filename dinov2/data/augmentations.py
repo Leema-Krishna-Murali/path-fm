@@ -163,12 +163,18 @@ class DataAugmentationDINO(object):
             ]
         )
 
-        # hed = hed_mod() ## SKIPPING HED AUGMENTATION
+        # # hed = hed_mod() ## SKIPPING HED AUGMENTATION
 
+        # self.global_transfo1 = transforms.Compose([color_jittering, global_transfo1_extra, self.normalize])#Do we apply to everything?
+        # self.global_transfo2 = transforms.Compose([color_jittering, global_transfo2_extra, self.normalize])
+        # # self.local_transfo = transforms.Compose([hed, color_jittering, local_transfo_extra, self.normalize])
+        # self.local_transfo = transforms.Compose([local_transfo_extra, self.normalize])
+
+        #----- from daniel partial_freeze branch
         self.global_transfo1 = transforms.Compose([color_jittering, global_transfo1_extra, self.normalize])#Do we apply to everything?
         self.global_transfo2 = transforms.Compose([color_jittering, global_transfo2_extra, self.normalize])
-        # self.local_transfo = transforms.Compose([hed, color_jittering, local_transfo_extra, self.normalize])
-        self.local_transfo = transforms.Compose([local_transfo_extra, self.normalize])
+        self.local_transfo = transforms.Compose([color_jittering, local_transfo_extra, self.normalize])
+        self.hedonly = transforms.Compose([self.normalize])
 
     def __call__(self, image):
         output = {}
