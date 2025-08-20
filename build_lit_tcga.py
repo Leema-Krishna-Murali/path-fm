@@ -417,13 +417,13 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="s3://tcga-litdata",
+        default="s3://tcga-384m-litdata",
         help="Output directory for LitData dataset (e.g., /path/to/dir or s3://bucket/prefix)"
     )
     parser.add_argument(
         "--tiles-per-mag",
         type=int,
-        default=1, #8445 for approximately 384 million tiles (8445 = 384M / (#_of_slides x #_of_levels))
+        default=8445, #8445 for approximately 384 million tiles (8445 = 384M / (#_of_slides x #_of_levels))
         help="Number of tiles to extract per magnification level"
     )
     parser.add_argument(
