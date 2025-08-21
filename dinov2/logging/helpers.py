@@ -90,7 +90,10 @@ class MetricLogger(object):
 
         log_msg = self.delimiter.join(log_list)
         MB = 1024.0 * 1024.0
-        for obj in iterable:
+        import itertools
+        infinite_iterable = itertools.cycle(iterable)
+
+        for obj in infinite_iterable:
             data_time.update(time.time() - end)
             yield obj
             iter_time.update(time.time() - end)

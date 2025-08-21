@@ -10,7 +10,7 @@ from typing import Any, Callable, List, Optional, TypeVar
 import torch
 from torch.utils.data import Sampler
 
-# from .datasets import ImageNet, ImageNet22k, TestVisionDataset, SlideDataset
+from .datasets import SlideDataset
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
 
 

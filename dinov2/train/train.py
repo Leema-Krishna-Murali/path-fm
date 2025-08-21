@@ -152,6 +152,7 @@ def do_train(cfg, model, resume=False):
     import tempfile
     
     def log_codebase_to_wandb():
+        pass
         """Log the entire codebase as a text file to wandb using Flatty"""
         try:
             # Run flatty to generate codebase text
@@ -236,6 +237,32 @@ def do_train(cfg, model, resume=False):
         dtype=inputs_dtype,
     )
 
+    # ###
+    # # setup data loader
+
+    # print("dataset path is", cfg.train.dataset_path)#This is the imagenet string shit
+    # dataset = make_dataset(
+    #     dataset_str=cfg.train.dataset_path,
+    #     transform=data_transform,
+    #     target_transform=lambda _: (),
+    # )
+    # # sampler_type = SamplerType.INFINITE
+    # sampler_type = SamplerType.SHARDED_INFINITE
+    # data_loader = make_data_loader(
+    #     dataset=dataset,
+    #     batch_size=cfg.train.batch_size_per_gpu,
+    #     num_workers=cfg.train.num_workers,
+    #     #num_workers = 1,
+    #     shuffle=True,
+    #     seed=start_iter,  # TODO: Fix this -- cfg.train.seed
+    #     sampler_type=sampler_type,
+    #     sampler_advance=0,  # TODO(qas): fix this -- start_iter * cfg.train.batch_size_per_gpu,
+    #     drop_last=True,
+    #     collate_fn=collate_fn,
+    # )
+
+    # ###
+
     import litdata as ld
     
     def extract_and_transform(item):
@@ -250,7 +277,12 @@ def do_train(cfg, model, resume=False):
         "aws_secret_access_key": os.environ.get("AWS_SECRET_ACCESS_KEY"),
     }
     
-    dataset = ld.StreamingDataset('s3://sophont/paul/data/litTCGA', storage_options=storage_options, shuffle=True, drop_last=True, transform=extract_and_transform)
+    dataset = ld.StreamingDataset('s3://sophont/paul/data/litTCGA_512patches',
+        storage_options=storage_options,
+        shuffle=True, 
+        drop_last=True, 
+        transform=extract_and_transform)
+        
     data_loader = ld.StreamingDataLoader(dataset, collate_fn=collate_fn)
 
     # training loop
@@ -262,7 +294,6 @@ def do_train(cfg, model, resume=False):
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
 
-    
     for data in metric_logger.log_every(
         data_loader,
         10,
