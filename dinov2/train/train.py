@@ -237,53 +237,64 @@ def do_train(cfg, model, resume=False):
         dtype=inputs_dtype,
     )
 
-    ### ORIGINAL SVS DATALOADER ###
-    # setup data loader
+    ### DATA LOADER SELECTION ###
+    # If the dataset path points to an s3:// location, use litdata StreamingDataset.
+    # Otherwise, fall back to the SVS/ImageNet loader path.
 
-    print("dataset path is", cfg.train.dataset_path)#This is the imagenet string shit
-    dataset = make_dataset(
-        dataset_str=cfg.train.dataset_path,
-        transform=data_transform,
-        target_transform=lambda _: (),
-    )
-    
-    sampler_type = SamplerType.SHARDED_INFINITE
-    data_loader = make_data_loader(
-        dataset=dataset,
-        batch_size=cfg.train.batch_size_per_gpu,
-        num_workers=cfg.train.num_workers,
-        #num_workers = 1,
-        shuffle=True,
-        seed=start_iter,  
-        sampler_type=sampler_type,
-        sampler_advance=0, 
-        drop_last=True,
-        collate_fn=collate_fn,
-    )
+    dataset_path = cfg.train.dataset_path
+    if isinstance(dataset_path, str) and dataset_path.startswith("s3://"):
+        # --- LITDATA DATALOADER ---
+        import litdata as ld
 
-    # ### LITDATA DATALOADER ###
+        def extract_and_transform(item):
+            # item example: {'image': PIL.Image, ...}
+            transformed = data_transform(item["image"])
+            return (transformed, None)
 
-    # import litdata as ld
-    
-    # def extract_and_transform(item):
-    #     # example item contents below:
-    #     # {'image': <PIL.Image.Image image mode=RGB size=256x256 at 0x7F0ADC361AE0>, 'slide_path': '/data/TCGA/8cf05aac-ecc7-4437-8f14-6ffc21fdba88/TCGA-12-0775-01Z-00-DX1.39db447e-3a48-4001-89c4-4925a2d059aa.svs', 'position': (np.int64(36102), np.int64(14477)), 'level': np.int64(0), 'magnification': np.float64(1.0), 'slide_id': 'TCGA-12-0775-01Z-00-DX1.39db447e-3a48-4001-89c4-4925a2d059aa'}
-    #     transformed = data_transform(item['image'])
-    #     return (transformed, None)  
+        storage_options = {
+            "endpoint_url": os.environ.get("AWS_ENDPOINT_URL"),
+            "aws_access_key_id": os.environ.get("AWS_ACCESS_KEY_ID"),
+            "aws_secret_access_key": os.environ.get("AWS_SECRET_ACCESS_KEY"),
+        }
 
-    # storage_options = {
-    #     "endpoint_url": os.environ.get("AWS_ENDPOINT_URL"),
-    #     "aws_access_key_id": os.environ.get("AWS_ACCESS_KEY_ID"),
-    #     "aws_secret_access_key": os.environ.get("AWS_SECRET_ACCESS_KEY"),
-    # }
-    
-    # dataset = ld.StreamingDataset('s3://sophont/paul/data/litTCGA_512patches',
-    #     storage_options=storage_options,
-    #     shuffle=True, 
-    #     drop_last=True, 
-    #     transform=extract_and_transform)
-        
-    # data_loader = ld.StreamingDataLoader(dataset, collate_fn=collate_fn)
+        dataset = ld.StreamingDataset(
+            dataset_path,
+            storage_options=storage_options,
+            shuffle=True,
+            drop_last=True,
+            transform=extract_and_transform,
+        )
+
+        data_loader = ld.StreamingDataLoader(
+            dataset,
+            batch_size=cfg.train.batch_size_per_gpu,
+            num_workers=cfg.train.num_workers,
+            drop_last=True,
+            pin_memory=True,
+            collate_fn=collate_fn,
+        )
+    else:
+        err
+        ### ORIGINAL SVS/IMAGENET DATALOADER ###
+        print("dataset path is", cfg.train.dataset_path) 
+        dataset = make_dataset(
+            dataset_str=cfg.train.dataset_path,
+            transform=data_transform,
+            target_transform=lambda _: (),
+        )
+
+        sampler_type = SamplerType.SHARDED_INFINITE
+        data_loader = make_data_loader(
+            dataset=dataset,
+            batch_size=cfg.train.batch_size_per_gpu,
+            num_workers=cfg.train.num_workers,
+            shuffle=True,
+            seed=start_iter,
+            sampler_type=sampler_type,
+            sampler_advance=0,
+            drop_last=True,
+            collate_fn=collate_fn,
+        )
 
     # training loop
 
