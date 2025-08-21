@@ -189,7 +189,7 @@ class SlideDatasetZarr(ExtendedVisionDataset):
         
         # Setup S3 connection
         if self.is_s3:
-            endpoint_url = os.environ.get("R2_ENDPOINT_URL")
+            endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
             
             # S3fs configuration
             self.s3fs_kwargs = {

@@ -50,9 +50,9 @@ class DirectR2ZarrConverter:
     def __init__(
         self,
         local_root: str,
-        s3_bucket: str = "tcga-omezarr",
+        s3_bucket: str = "sophont/paul/data/omezarr-test",
         s3_prefix: str = "",
-        chunk_size: int = 512,
+        chunk_size: int = 1000, # roughly 20 MB chunks?
         compression_level: int = 3,
         max_workers: int = None,
         batch_size: int = 16
@@ -75,9 +75,9 @@ class DirectR2ZarrConverter:
     
     def _setup_s3fs(self) -> s3fs.S3FileSystem:
         """Setup S3 filesystem with R2 configuration."""
-        endpoint_url = os.environ.get("R2_ENDPOINT_URL")
+        endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
         if not endpoint_url:
-            raise ValueError("R2_ENDPOINT_URL environment variable not set")
+            raise ValueError("AWS_ENDPOINT_URL environment variable not set")
         
         return s3fs.S3FileSystem(
             key=os.environ.get("AWS_ACCESS_KEY_ID"),
@@ -410,13 +410,13 @@ def main():
     parser = argparse.ArgumentParser(
         description='Convert TCGA to OME-Zarr following Midnight CPath specs'
     )
-    parser.add_argument('--local-root', default='/data/TCGA',
+    parser.add_argument('--local-root', default='/data/TCGA_small',
                         help='Root directory containing SVS files')
-    parser.add_argument('--s3-bucket', default='tcga-omezarr',
+    parser.add_argument('--s3-bucket', default='sophont/paul/data/omezarr-test',
                         help='S3 bucket name')
-    parser.add_argument('--chunk-size', type=int, default=512,
+    parser.add_argument('--chunk-size', type=int, default=1000,
                         help='Chunk size for zarr arrays')
-    parser.add_argument('--compression-level', type=int, default=3,
+    parser.add_argument('--compression-level', type=int, default=5,
                         help='Zstd compression level (1-22)')
     parser.add_argument('--max-workers', type=int, default=4,
                         help='Maximum parallel workers')
@@ -424,7 +424,7 @@ def main():
     args = parser.parse_args()
     
     # Check R2 credentials
-    required_vars = ['R2_ENDPOINT_URL', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY']
+    required_vars = ['AWS_ENDPOINT_URL', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY']
     missing = [v for v in required_vars if not os.environ.get(v)]
     
     if missing:
