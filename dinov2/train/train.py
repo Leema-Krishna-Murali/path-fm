@@ -471,4 +471,19 @@ def main(args):
 
 if __name__ == "__main__":
     args = get_args_parser(add_help=True).parse_args()
-    main(args)
+    try:
+        main(args)
+    finally:
+        try:
+            # Close W&B on the main process if it was started
+            if 'wandb' in globals() and distributed.is_main_process():
+                try:
+                    wandb.finish()
+                except Exception:
+                    pass
+            # Cleanly tear down the distributed process group to avoid NCCL warnings
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                torch.distributed.destroy_process_group()
+        except Exception:
+            # Ensure we never mask the real exit reason with cleanup issues
+            pass
