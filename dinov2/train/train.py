@@ -263,6 +263,7 @@ def do_train(cfg, model, resume=False):
             shuffle=True,
             drop_last=True,
             transform=extract_and_transform,
+            max_cache_size="1024GB",
         )
 
         data_loader = ld.StreamingDataLoader(
@@ -274,7 +275,6 @@ def do_train(cfg, model, resume=False):
             collate_fn=collate_fn,
         )
     else:
-        err
         ### ORIGINAL SVS/IMAGENET DATALOADER ###
         print("dataset path is", cfg.train.dataset_path) 
         dataset = make_dataset(
