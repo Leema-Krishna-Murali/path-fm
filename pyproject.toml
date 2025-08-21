@@ -27,6 +27,7 @@ dependencies = [
     "kaiko-eva[vision]>=0.3.3",
     "xformers==0.0.32.post1",
     "litdata",
+    "ipykernel",
 ]
 
 [[tool.uv.index]]
