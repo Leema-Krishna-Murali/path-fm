@@ -261,16 +261,29 @@ def do_train(cfg, model, resume=False):
             dataset_path,
             storage_options=storage_options,
             shuffle=True,
-            drop_last=True,
             transform=extract_and_transform,
             max_cache_size="1024GB",
         )
+        # Avoid dropping the only batch when the dataset is tiny.
+        # Use drop_last only when running multi-GPU to keep batches aligned across ranks.
+        world_size = distributed.get_global_size()
+        drop_last_loader = world_size > 1
+        try:
+            ds_len = len(dataset)
+        except Exception:
+            ds_len = None
+        if ds_len is not None and ds_len < cfg.train.batch_size_per_gpu:
+            logger.warning(
+                f"Streaming dataset has only {ds_len} samples (< batch_size={cfg.train.batch_size_per_gpu}). "
+                "Setting drop_last=False to avoid empty DataLoader."
+            )
+            drop_last_loader = False
 
         data_loader = ld.StreamingDataLoader(
             dataset,
             batch_size=cfg.train.batch_size_per_gpu,
             num_workers=cfg.train.num_workers,
-            drop_last=True,
+            drop_last=drop_last_loader,
             pin_memory=True,
             collate_fn=collate_fn,
         )

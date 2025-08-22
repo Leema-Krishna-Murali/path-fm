@@ -90,13 +90,29 @@ class MetricLogger(object):
 
         log_msg = self.delimiter.join(log_list)
         MB = 1024.0 * 1024.0
-        import itertools
-        infinite_iterable = itertools.cycle(iterable)
 
-        for obj in infinite_iterable:
+        # Non-caching iteration: re-create the iterator on StopIteration
+        iterator = iter(iterable)
+        while True:
+            try:
+                obj = next(iterator)
+            except StopIteration:
+                iterator = iter(iterable)
+                continue
+
+            # Measure data time since last end (matches prior semantics)
             data_time.update(time.time() - end)
+
+            # Yield the batch to the caller for processing
             yield obj
+
+            # Drop our reference to the batch to avoid retaining it
+            obj = None
+            del obj
+
+            # Measure iteration time (includes compute + data)
             iter_time.update(time.time() - end)
+
             if i % print_freq == 0 or i == n_iterations - 1:
                 self.dump_in_output_file(iteration=i, iter_time=iter_time.avg, data_time=data_time.avg)
                 eta_seconds = iter_time.global_avg * (n_iterations - i)
@@ -124,10 +140,12 @@ class MetricLogger(object):
                             data=str(data_time),
                         )
                     )
+
             i += 1
             end = time.time()
             if i >= n_iterations:
                 break
+
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         logger.info("{} Total time: {} ({:.6f} s / it)".format(header, total_time_str, total_time / n_iterations))
