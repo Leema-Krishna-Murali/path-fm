@@ -8,6 +8,7 @@ import datetime
 import json
 import logging
 import time
+from typing import Optional, Iterator, Any
 
 import torch
 
@@ -61,9 +62,9 @@ class MetricLogger(object):
         dict_to_dump.update({k: v.median for k, v in self.meters.items()})
         with open(self.output_file, "a") as f:
             f.write(json.dumps(dict_to_dump) + "\n")
-        pass
 
     def log_every(self, iterable, print_freq, header=None, n_iterations=None, start_iteration=0):
+        """Optimized version for StreamingDataset that avoids iterator recreation"""
         i = start_iteration
         if not header:
             header = ""
@@ -72,56 +73,71 @@ class MetricLogger(object):
         iter_time = SmoothedValue(fmt="{avg:.6f}")
         data_time = SmoothedValue(fmt="{avg:.6f}")
 
+        # Try to get length efficiently
         if n_iterations is None:
-            n_iterations = len(iterable)
+            try:
+                n_iterations = len(iterable)
+            except (TypeError, AttributeError):
+                # If len() not available, must count
+                logger.warning("Cannot determine dataset length, progress reporting may be inaccurate")
+                n_iterations = float('inf')
 
-        space_fmt = ":" + str(len(str(n_iterations))) + "d"
+        space_fmt = ":" + str(len(str(n_iterations))) + "d" if n_iterations != float('inf') else ""
 
+        # Pre-build log message template
         log_list = [
             header,
-            "[{0" + space_fmt + "}/{1}]",
+            "[{0" + space_fmt + "}/{1}]" if n_iterations != float('inf') else "[{0}]",
             "eta: {eta}",
             "{meters}",
             "time: {time}",
             "data: {data}",
         ]
-        if torch.cuda.is_available():
+        
+        has_cuda = torch.cuda.is_available()
+        if has_cuda:
             log_list += ["max mem: {memory:.0f}"]
 
         log_msg = self.delimiter.join(log_list)
         MB = 1024.0 * 1024.0
 
-        # Non-caching iteration: re-create the iterator on StopIteration
-        iterator = iter(iterable)
-        while True:
-            try:
-                obj = next(iterator)
-            except StopIteration:
-                iterator = iter(iterable)
-                continue
+        # Check if we should log on this rank
+        should_log = distributed.is_main_process() if distributed.is_enabled() else True
+        
+        # Pre-compute print iterations for faster checking
+        print_iterations = set(range(0, n_iterations if n_iterations != float('inf') else 1000000, print_freq))
+        if n_iterations != float('inf'):
+            print_iterations.add(n_iterations - 1)
 
-            # Measure data time since last end (matches prior semantics)
+        # Single iteration through the dataset
+        for batch_idx, obj in enumerate(iterable, start=i):
+            # Measure data loading time
             data_time.update(time.time() - end)
-
-            # Yield the batch to the caller for processing
+            
+            # Yield the batch
             yield obj
-
-            # Drop our reference to the batch to avoid retaining it
+            
+            # Clear reference immediately
             obj = None
-            del obj
-
-            # Measure iteration time (includes compute + data)
+            
+            # Measure full iteration time
             iter_time.update(time.time() - end)
-
-            if i % print_freq == 0 or i == n_iterations - 1:
-                self.dump_in_output_file(iteration=i, iter_time=iter_time.avg, data_time=data_time.avg)
-                eta_seconds = iter_time.global_avg * (n_iterations - i)
-                eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
-                if torch.cuda.is_available():
+            
+            # Log if needed (optimized check)
+            if should_log and (batch_idx in print_iterations or (n_iterations == float('inf') and batch_idx % print_freq == 0)):
+                self.dump_in_output_file(iteration=batch_idx, iter_time=iter_time.avg, data_time=data_time.avg)
+                
+                if n_iterations != float('inf'):
+                    eta_seconds = iter_time.global_avg * (n_iterations - batch_idx)
+                    eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
+                else:
+                    eta_string = "unknown"
+                
+                if has_cuda:
                     logger.info(
                         log_msg.format(
-                            i,
-                            n_iterations,
+                            batch_idx,
+                            n_iterations if n_iterations != float('inf') else "?",
                             eta=eta_string,
                             meters=str(self),
                             time=str(iter_time),
@@ -132,23 +148,106 @@ class MetricLogger(object):
                 else:
                     logger.info(
                         log_msg.format(
-                            i,
-                            n_iterations,
+                            batch_idx,
+                            n_iterations if n_iterations != float('inf') else "?",
                             eta=eta_string,
                             meters=str(self),
                             time=str(iter_time),
                             data=str(data_time),
                         )
                     )
-
-            i += 1
+            
             end = time.time()
-            if i >= n_iterations:
+            
+            # Early exit if we know the length
+            if n_iterations != float('inf') and batch_idx >= n_iterations - 1:
                 break
 
+        # Final statistics
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-        logger.info("{} Total time: {} ({:.6f} s / it)".format(header, total_time_str, total_time / n_iterations))
+        
+        if n_iterations != float('inf'):
+            actual_iterations = min(batch_idx + 1, n_iterations)
+            logger.info("{} Total time: {} ({:.6f} s / it)".format(
+                header, total_time_str, total_time / actual_iterations))
+        else:
+            logger.info("{} Total time: {}".format(header, total_time_str))
+
+    def log_every_streaming(self, iterable, print_freq, header=None, max_iterations=None, start_iteration=0):
+        """Alternative method optimized specifically for streaming/infinite datasets"""
+        i = start_iteration
+        if not header:
+            header = ""
+        start_time = time.time()
+        end = time.time()
+        iter_time = SmoothedValue(fmt="{avg:.6f}")
+        data_time = SmoothedValue(fmt="{avg:.6f}")
+
+        log_list = [
+            header,
+            "[{0}]",
+            "{meters}",
+            "time: {time}",
+            "data: {data}",
+        ]
+        
+        has_cuda = torch.cuda.is_available()
+        if has_cuda:
+            log_list += ["max mem: {memory:.0f}"]
+
+        log_msg = self.delimiter.join(log_list)
+        MB = 1024.0 * 1024.0
+
+        should_log = distributed.is_main_process() if distributed.is_enabled() else True
+        
+        for batch_idx, obj in enumerate(iterable, start=i):
+            # Check max iterations
+            if max_iterations is not None and batch_idx >= max_iterations:
+                break
+                
+            # Measure data loading time
+            data_time.update(time.time() - end)
+            
+            # Yield the batch
+            yield obj
+            
+            # Clear reference
+            obj = None
+            
+            # Measure full iteration time  
+            iter_time.update(time.time() - end)
+            
+            # Log periodically
+            if should_log and batch_idx % print_freq == 0:
+                self.dump_in_output_file(iteration=batch_idx, iter_time=iter_time.avg, data_time=data_time.avg)
+                
+                if has_cuda:
+                    logger.info(
+                        log_msg.format(
+                            batch_idx,
+                            meters=str(self),
+                            time=str(iter_time),
+                            data=str(data_time),
+                            memory=torch.cuda.max_memory_allocated() / MB,
+                        )
+                    )
+                else:
+                    logger.info(
+                        log_msg.format(
+                            batch_idx,
+                            meters=str(self),
+                            time=str(iter_time),
+                            data=str(data_time),
+                        )
+                    )
+            
+            end = time.time()
+
+        # Final statistics
+        total_time = time.time() - start_time
+        total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+        logger.info("{} Total time: {}".format(header, total_time_str))
 
 
 class SmoothedValue:
