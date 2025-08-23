@@ -642,6 +642,12 @@ def read_counts_for_run_local(local_stats_dir: str,
 
 
 def allocate_across_magnifications(cumulative: Dict[float, int], budget: int, magnifications: List[float]) -> Dict[float, int]:
+    """Water-fill budget across magnifications to equalize totals.
+
+    Fixes edge case when all cumulative counts are equal (or ties exist):
+    we should advance to the next level rather than allocating the entire
+    remaining budget to the first group.
+    """
     mags = list(magnifications)
     cum = np.array([int(cumulative.get(m, 0)) for m in mags], dtype=np.int64)
     M = len(mags)
@@ -651,10 +657,14 @@ def allocate_across_magnifications(cumulative: Dict[float, int], budget: int, ma
     sorted_cum = cum[order].astype(np.float64)
     T = float(budget)
     levels = sorted_cum.copy()
+    # Raise the lowest groups to the next distinct level while we have budget
     for i in range(M - 1):
         gap = levels[i + 1] - levels[i]
         cost = gap * (i + 1)
-        if T >= cost and cost > 0:
+        # If there is no gap (equal baselines), just move to the next group
+        if cost <= 0:
+            continue
+        if T >= cost:
             levels[: i + 1] += gap
             T -= cost
         else:
@@ -662,10 +672,12 @@ def allocate_across_magnifications(cumulative: Dict[float, int], budget: int, ma
             levels[: i + 1] += inc
             T = 0.0
             break
+    # If budget remains after equalizing all groups, distribute uniformly
     if T > 0:
         inc = T / M
         levels += inc
         T = 0.0
+    # Convert fractional deltas to integer allocations with remainder handling
     deltas = levels - sorted_cum
     deltas_int = np.floor(deltas).astype(np.int64)
     remainder = int(round(budget - int(deltas_int.sum())))
@@ -916,7 +928,7 @@ def create_litdata_dataset(input_dir: str,
     mode = "overwrite" if not already_processed else "append"
 
     # Batch slides
-    batch_size = 5000
+    batch_size = 2500
     batches = [slides_to_process[i:i+batch_size] for i in range(0, len(slides_to_process), batch_size)]
 
     # Process batches
