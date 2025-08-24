@@ -265,15 +265,6 @@ def do_train(cfg, model, resume=False):
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
 
-<<<<<<< HEAD
-    for data in metric_logger.log_every_streaming(
-        data_loader,
-        10,
-        header,
-        max_iter,
-        start_iter,
-    ):
-=======
     for data in data_loader:
     # for data in metric_logger.log_every_streaming(
     #     data_loader,
@@ -282,7 +273,6 @@ def do_train(cfg, model, resume=False):
     #     max_iter,
     #     start_iter,
     # ):
->>>>>>> ecbf9b2 (final working version, just needs some general code tidying up)
         current_batch_size = data["collated_global_crops"].shape[0] / 2
         if iteration > max_iter:
             return
