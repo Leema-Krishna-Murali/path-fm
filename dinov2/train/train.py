@@ -223,10 +223,7 @@ def do_train(cfg, model, resume=False):
             shuffle=True,
             drop_last=True,
             transform=extract_and_transform,
-<<<<<<< HEAD
-=======
             max_cache_size="1000GB", # default is 100GB
->>>>>>> ecbf9b2 (final working version, just needs some general code tidying up)
         )
 
         data_loader = ld.StreamingDataLoader(
