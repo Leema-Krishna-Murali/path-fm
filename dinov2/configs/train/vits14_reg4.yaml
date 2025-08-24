@@ -10,6 +10,7 @@ ibot:
   head_n_prototypes: 131072
 train:
   OFFICIAL_EPOCH_LENGTH: 100
+  saveckp_freq: 50 # default is 20
   batch_size_per_gpu: 32
     #  dataset_path: ImageNet22k
   centering: sinkhorn_knopp

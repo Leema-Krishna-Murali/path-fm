@@ -8,6 +8,7 @@ import logging
 import math
 import os
 from functools import partial
+from omegaconf import OmegaConf
 
 from fvcore.common.checkpoint import PeriodicCheckpointer
 import torch
@@ -147,52 +148,11 @@ def do_train(cfg, model, resume=False):
         last_layer_lr_schedule,
     ) = build_schedulers(cfg)
     
-    from omegaconf import OmegaConf
-    import subprocess
-    import tempfile
-    
-    def log_codebase_to_wandb():
-        pass
-        """Log the entire codebase as a text file to wandb using Flatty"""
-        try:
-            # Run flatty to generate codebase text
-            result = subprocess.run(
-                ["/home/paul/bin/flatty"],
-                cwd="/home/paul/path-fm",
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            
-            if result.returncode == 0:
-                codebase_text = result.stdout
-                # Create a temporary file with the codebase content
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                    f.write(codebase_text)
-                    temp_path = f.name
-                
-                # Log as wandb artifact
-                artifact = wandb.Artifact('codebase-snapshot', type='code')
-                artifact.add_file(temp_path, name='codebase.txt')
-                wandb.log_artifact(artifact)
-                
-                # Clean up temp file
-                os.unlink(temp_path)
-                logger.info("Codebase successfully logged to wandb")
-            else:
-                logger.warning(f"Flatty failed with return code {result.returncode}: {result.stderr}")
-        except Exception as e:
-            logger.warning(f"Failed to log codebase to wandb: {e}")
-    
     if distributed.is_main_process():
         run = wandb.init(
             project="midnight-rep",  # Specify your project
             config = OmegaConf.to_container(cfg)
         )
-        
-        # Log codebase snapshot once at the start of training
-        log_codebase_to_wandb()
-
 
 
     # checkpointer
@@ -205,7 +165,7 @@ def do_train(cfg, model, resume=False):
 
     periodic_checkpointer = PeriodicCheckpointer(
         checkpointer,
-        period=3 * OFFICIAL_EPOCH_LENGTH,
+        period=cfg.train.saveckp_freq * OFFICIAL_EPOCH_LENGTH,
         max_iter=max_iter,
         max_to_keep=3,
     )
@@ -261,7 +221,12 @@ def do_train(cfg, model, resume=False):
             dataset_path,
             storage_options=storage_options,
             shuffle=True,
+            drop_last=True,
             transform=extract_and_transform,
+<<<<<<< HEAD
+=======
+            max_cache_size="1000GB", # default is 100GB
+>>>>>>> ecbf9b2 (final working version, just needs some general code tidying up)
         )
 
         data_loader = ld.StreamingDataLoader(
@@ -303,6 +268,7 @@ def do_train(cfg, model, resume=False):
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
 
+<<<<<<< HEAD
     for data in metric_logger.log_every_streaming(
         data_loader,
         10,
@@ -310,10 +276,21 @@ def do_train(cfg, model, resume=False):
         max_iter,
         start_iter,
     ):
+=======
+    for data in data_loader:
+    # for data in metric_logger.log_every_streaming(
+    #     data_loader,
+    #     10,
+    #     header,
+    #     max_iter,
+    #     start_iter,
+    # ):
+>>>>>>> ecbf9b2 (final working version, just needs some general code tidying up)
         current_batch_size = data["collated_global_crops"].shape[0] / 2
         if iteration > max_iter:
             return
-
+        elif iteration % 10 == 0:
+            print(f"iter {iteration} out of {max_iter}")
         # apply schedules
 
         lr = lr_schedule[iteration]
@@ -360,12 +337,12 @@ def do_train(cfg, model, resume=False):
             raise AssertionError
         losses_reduced = sum(loss for loss in loss_dict_reduced.values())
 
-        metric_logger.update(lr=lr)
-        metric_logger.update(wd=wd)
-        metric_logger.update(mom=mom)
-        metric_logger.update(last_layer_lr=last_layer_lr)
-        metric_logger.update(current_batch_size=current_batch_size)
-        metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
+        # metric_logger.update(lr=lr)
+        # metric_logger.update(wd=wd)
+        # metric_logger.update(mom=mom)
+        # metric_logger.update(last_layer_lr=last_layer_lr)
+        # metric_logger.update(current_batch_size=current_batch_size)
+        # metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
         
         if distributed.is_main_process():
             wandb.log({"Learning Rate":lr,
@@ -387,8 +364,9 @@ def do_train(cfg, model, resume=False):
         periodic_checkpointer.step(iteration)
 
         iteration = iteration + 1
-    metric_logger.synchronize_between_processes()
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    # metric_logger.synchronize_between_processes()
+    # return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return
 
 
 def main(args):
