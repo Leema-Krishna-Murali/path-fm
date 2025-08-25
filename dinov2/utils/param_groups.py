@@ -67,8 +67,6 @@ def get_params_groups_with_decay(model, lr_decay_rate=1.0, patch_embed_lr_mult=1
 
     for name, param in model.named_parameters():
         name = name.replace("_fsdp_wrapped_module.", "")
-        if not param.requires_grad:
-            continue
         decay_rate = get_vit_lr_decay_rate(
             name, lr_decay_rate, num_layers=n_blocks, force_is_backbone=n_blocks > 0, chunked_blocks=chunked_blocks
         )

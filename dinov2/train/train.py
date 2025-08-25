@@ -170,6 +170,14 @@ def do_train(cfg, model, resume=False):
         max_to_keep=3,
     )
 
+    # determine warmup cutoff and whether we need to unfreeze immediately (resume-safety)
+    warmup_cutoff = cfg.optim["warmup_epochs"] * OFFICIAL_EPOCH_LENGTH
+    partially_frozen = start_iter < warmup_cutoff
+    if not partially_frozen:
+        # If resuming past warmup, make sure student is fully unfrozen now
+        for p in model.student.parameters():
+            p.requires_grad = True
+
     # setup data preprocessing
 
     img_size = cfg.crops.global_crops_size
@@ -249,7 +257,7 @@ def do_train(cfg, model, resume=False):
             batch_size=cfg.train.batch_size_per_gpu,
             num_workers=cfg.train.num_workers,
             shuffle=True,
-            seed=start_iter,
+            seed=0,
             sampler_type=sampler_type,
             sampler_advance=0,
             drop_last=True,
@@ -276,8 +284,18 @@ def do_train(cfg, model, resume=False):
         current_batch_size = data["collated_global_crops"].shape[0] / 2
         if iteration > max_iter:
             return
-        elif iteration % 10 == 0:
-            print(f"iter {iteration} out of {max_iter}")
+
+        if distributed.is_main_process():
+            if iteration % 50 == 0:
+                print(f"Iteration {iteration} out of {max_iter}")
+
+        # disable partial freezing after warmup (robust and resume-safe)
+        if partially_frozen and iteration >= warmup_cutoff:
+            print("\nDISABLING PARTIAL FREEZE")
+            for p in model.student.parameters():
+                p.requires_grad = True
+            partially_frozen = False
+
         # apply schedules
 
         lr = lr_schedule[iteration]
@@ -362,9 +380,13 @@ def main(args):
     model = SSLMetaArch(cfg).to(torch.device("cuda"))
     #Load model here from pretrained.
     if True:#cfg.train.use_pretrained and "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
-        print("load small")
+        if "small" in cfg.student.arch:
+            model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')
+        elif "giant" in cfg.student.arch:
+            model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitg14_reg')
+        else:
+            err
         
-        model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
         model_pretrained = model_pretrained.to(torch.device("cuda"))
         model.student.backbone.patch_embed.proj.weight = model_pretrained.patch_embed.proj.weight
         model.student.backbone.patch_embed.proj.bias = model_pretrained.patch_embed.proj.bias
@@ -404,11 +426,16 @@ def main(args):
                     sublayer.norm2.weight = current.norm2.weight
                     sublayer.norm2.bias = current.norm2.bias
 
-                    sublayer.mlp.fc1.weight = current.mlp.fc1.weight
-                    sublayer.mlp.fc2.weight = current.mlp.fc2.weight
-                    
-                    sublayer.mlp.fc1.bias = current.mlp.fc1.bias
-                    sublayer.mlp.fc2.bias = current.mlp.fc2.bias
+                    try:
+                        sublayer.mlp.fc1.weight = current.mlp.fc1.weight
+                        sublayer.mlp.fc2.weight = current.mlp.fc2.weight
+                        sublayer.mlp.fc1.bias = current.mlp.fc1.bias
+                        sublayer.mlp.fc2.bias = current.mlp.fc2.bias
+                    except: # because of the use of SwiGLUFFNFused with ViT-giant
+                        sublayer.mlp.w12.weight = current.mlp.w12.weight
+                        sublayer.mlp.w12.bias = current.mlp.w12.bias
+                        sublayer.mlp.w3.weight = current.mlp.w3.weight
+                        sublayer.mlp.w3.bias = current.mlp.w3.bias
 
                     sublayer.ls1.gamma = current.ls1.gamma
                     sublayer.ls2.gamma = current.ls2.gamma
@@ -416,8 +443,18 @@ def main(args):
         model.student.backbone.norm.weight = model_pretrained.norm.weight
         model.student.backbone.norm.bias = model_pretrained.norm.bias 
 
-    model.prepare_for_distributed_training()
+    # enable partial freeze during warmup: freeze only the student backbone
+    for p in model.student.parameters():
+        p.requires_grad = False
+    if hasattr(model.student, "ibot_head"):
+        for p in model.student.ibot_head.parameters():
+            p.requires_grad = True
+    if hasattr(model.student, "dino_head"):
+        for p in model.student.dino_head.parameters():
+            p.requires_grad = True
+    model.student.backbone.pos_embed.requires_grad = True
 
+    model.prepare_for_distributed_training()
 
     logger.info("Model:\n{}".format(model))
     if args.eval_only:
