@@ -7,18 +7,80 @@ from typing import Sequence
 
 import torch
 from torchvision import transforms
+import random
+import cv2  # OpenCV is required for fast blur
+import numpy as np
+from PIL import Image
 
 
 class GaussianBlur(transforms.RandomApply):
     """
-    Apply Gaussian Blur to the PIL image.
+    Apply Gaussian blur (torchvision) with probability ``p``.
+
+    Note: ``transforms.RandomApply``'s ``p`` is the probability to apply
+    the transform (not to keep the original). The previous code inverted
+    this, causing much more blur than intended.
     """
 
     def __init__(self, *, p: float = 0.5, radius_min: float = 0.1, radius_max: float = 2.0):
-        # NOTE: torchvision is applying 1 - probability to return the original image
-        keep_p = 1 - p
         transform = transforms.GaussianBlur(kernel_size=9, sigma=(radius_min, radius_max))
-        super().__init__(transforms=[transform], p=keep_p)
+        super().__init__(transforms=[transform], p=p)
+
+
+class FastGaussianBlur(torch.nn.Module):
+    """
+    Faster Gaussian blur using OpenCV for PIL images (no fallback).
+
+    - Expects PIL.Image input (before ToTensor) and applies ``cv2.GaussianBlur``.
+    - This path is typically faster than PIL/torchvision on CPU due to SIMD.
+
+    Args:
+        p: Probability to apply the blur.
+        radius_min: Minimum sigma for Gaussian kernel.
+        radius_max: Maximum sigma for Gaussian kernel.
+        kernel_size: Odd kernel size, defaults to 9 (DINO default).
+    """
+
+    def __init__(
+        self,
+        *,
+        p: float = 0.5,
+        radius_min: float = 0.1,
+        radius_max: float = 2.0,
+        kernel_size: int = 9,
+    ) -> None:
+        super().__init__()
+        if kernel_size % 2 == 0 or kernel_size <= 1:
+            raise ValueError("kernel_size must be an odd integer > 1")
+        if radius_min <= 0 or radius_max <= 0 or radius_min > radius_max:
+            raise ValueError("radius_min and radius_max must be positive with min <= max")
+        self.p = float(p)
+        self.radius_min = float(radius_min)
+        self.radius_max = float(radius_max)
+        self.kernel_size = int(kernel_size)
+
+    def __call__(self, img):
+        if random.random() >= self.p:
+            return img
+        if not isinstance(img, Image.Image):
+            raise TypeError("FastGaussianBlur expects a PIL.Image input before ToTensor")
+
+        sigma = random.uniform(self.radius_min, self.radius_max)
+
+        # Convert PIL -> numpy (RGB) without color conversion; Gaussian is color-agnostic
+        np_img = np.array(img)
+        if not np_img.flags.c_contiguous:
+            np_img = np.ascontiguousarray(np_img)
+
+        blurred = cv2.GaussianBlur(
+            np_img,
+            (self.kernel_size, self.kernel_size),
+            sigmaX=sigma,
+            sigmaY=sigma,
+            borderType=cv2.BORDER_REFLECT101,
+        )
+
+        return Image.fromarray(blurred)
 
 
 class MaybeToTensor(transforms.ToTensor):

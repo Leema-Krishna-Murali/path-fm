@@ -7,8 +7,10 @@ import argparse
 import logging
 import math
 import os
+import subprocess
 from functools import partial
 from omegaconf import OmegaConf
+import glob
 
 from fvcore.common.checkpoint import PeriodicCheckpointer
 import torch
@@ -27,6 +29,7 @@ from dinov2.train.ssl_meta_arch import SSLMetaArch
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
 logger = logging.getLogger("dinov2")
 import wandb
+
 
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("DINOv2 training", add_help=add_help)
@@ -130,6 +133,7 @@ def do_test(cfg, model, iteration):
         # save teacher checkpoint
         teacher_ckp_path = os.path.join(eval_dir, "teacher_checkpoint.pth")
         torch.save({"teacher": new_state_dict}, teacher_ckp_path)
+        print("\n Teacher model ckpt has been saved")
 
 
 def do_train(cfg, model, resume=False):
@@ -165,10 +169,13 @@ def do_train(cfg, model, resume=False):
 
     periodic_checkpointer = PeriodicCheckpointer(
         checkpointer,
-        period=cfg.train.saveckp_freq * OFFICIAL_EPOCH_LENGTH,
+        period=cfg.evaluation.eval_period_iterations,
         max_iter=max_iter,
-        max_to_keep=3,
     )
+    
+    # Track first teacher-checkpoint to export codebase once
+    flatty_uploaded = False
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
     # determine warmup cutoff and whether we need to unfreeze immediately (resume-safety)
     warmup_cutoff = cfg.optim["warmup_epochs"] * OFFICIAL_EPOCH_LENGTH
@@ -286,7 +293,7 @@ def do_train(cfg, model, resume=False):
             return
 
         if distributed.is_main_process():
-            if iteration % 50 == 0:
+            if iteration % 10 == 0:
                 print(f"Iteration {iteration} out of {max_iter}")
 
         # disable partial freezing after warmup (robust and resume-safe)
@@ -362,11 +369,26 @@ def do_train(cfg, model, resume=False):
         
         # checkpointing and testing
 
-        #Save instantly
+        did_eval_checkpoint = False
         if cfg.evaluation.eval_period_iterations >= 0 and (iteration) % cfg.evaluation.eval_period_iterations == 0:
+            print(f"do_test at iteration {iteration}")
             do_test(cfg, model, f"training_{iteration}")
             torch.cuda.synchronize()
+            did_eval_checkpoint = True
+
         periodic_checkpointer.step(iteration)
+
+        # On the first teacher checkpoint only, run Flatty and upload to W&B
+        if distributed.is_main_process() and did_eval_checkpoint and not flatty_uploaded:
+            print("running flatty...")
+            subprocess.run(["bash", "flatty.sh"], check=True, cwd=repo_root)
+            candidates = glob.glob(os.path.join(repo_root, "logs", "*.txt"))
+            print("finished running flatty...")
+            if candidates and wandb.run is not None:
+                latest = max(candidates, key=os.path.getmtime)
+                wandb.save(latest)
+                print('saved to wandb')
+            flatty_uploaded = True
 
         iteration = iteration + 1
     # metric_logger.synchronize_between_processes()

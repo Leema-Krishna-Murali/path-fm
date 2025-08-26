@@ -1,7 +1,3 @@
-[build-system]
-requires = ["setuptools>=69", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "pathologydino"
 version = "0.1.0"
@@ -40,9 +36,3 @@ torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 torchaudio = { index = "pytorch-cu128" }
 xformers = { index = "pytorch-cu128" }
-
-[tool.setuptools.packages.find]
-include = ["dinov2*"]
-
-[tool.setuptools]
-script-files = ["scripts/flatty.sh"]
