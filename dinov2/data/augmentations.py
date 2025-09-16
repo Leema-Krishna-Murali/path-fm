@@ -9,7 +9,6 @@ from torchvision import transforms
 
 from .transforms import (
     GaussianBlur,
-    FastGaussianBlur,
     make_normalize_transform,
 )
 from skimage.color import rgb2hed, hed2rgb
@@ -19,75 +18,80 @@ from einops import rearrange, reduce, repeat
 import random
 import matplotlib.pyplot as plt
 logger = logging.getLogger("dinov2")
-
+import numpy as np
 import torchvision
 
-# class hed_mod(torch.nn.Module):
+class hed_mod(torch.nn.Module):
 
-#     def forward(self, img, label = None):
+    def forward(self, img, label = None):
         
-#         if img !=None:
-#             #Convert image from RGB to HED.
-#             #Input shape is (3,size, size)
-#             #Convert to chanels last, then swap back
-#             img = torchvision.transforms.functional.pil_to_tensor(img)
 
-#             img = rearrange(img, 'c h w -> h w c')
-#             img_orig = img
-#             hed_image = rgb2hed(img)
-#             #Modify channels, each with random amount, between -.05 and .05
-#             mini = -.05
-#             maxi = .05
-#             total = maxi - mini
-            
-#             if False:
-#                 hed_image[..., 0] *= (1 + random.uniform(0, total) - maxi)#H
-#                 hed_image[..., 1] *= (1 + random.uniform(0, total) - maxi)#E
-#                 hed_image[..., 2] *= (1 + random.uniform(0, total) - maxi)#D
-#             else:
-#                 hed_image[..., 0] += random.uniform(0, total) - maxi#H
-#                 hed_image[..., 1] += random.uniform(0, total) - maxi#E
-#                 hed_image[..., 2] += random.uniform(0, total) - maxi#D
-           
-#             img = hed2rgb(hed_image)
+        chance = random.uniform(0,1) > .5
+        if chance:
+            return img
 
-#             if False:#debug
-#                 fig, axes = plt.subplots(1, 2, figsize=(10, 5)) # Adjust figsize as needed
-#                 axes[0].imshow(img_orig)
-#                 axes[0].set_title("Before")
-#                 axes[0].axis('off') # Turn off axis ticks and labels for cleaner image display
+        if img !=None:
+            #Convert image from RGB to HED.
+            #Input shape is (3,size, size)
+            #Convert to chanels last, then swap back
+            img = torchvision.transforms.functional.pil_to_tensor(img)
 
-#                 # Plot the "After" image on the second subplot
-#                 axes[1].imshow(img)
-#                 axes[1].set_title("After")
-#                 axes[1].axis('off') # Turn off axis ticks and labels
+            img = rearrange(img, 'c h w -> h w c')
+            img_orig = img
+            hed_image = rgb2hed(img)
+            #Modify channels, each with random amount, between -.05 and .05
+            mini =  -.05
+            maxi = .05
+            if False:
+                hed_image[..., 0] *= (1 + random.uniform(mini, maxi))#H
+                hed_image[..., 1] *= (1 + random.uniform(mini, maxi))#E
+                hed_image[..., 2] *= (1 + random.uniform(mini, maxi))#D
+            else:
+                hed_image[..., 0] += random.uniform(mini, maxi)#H
+                hed_image[..., 1] += random.uniform(mini, maxi)#E
+                hed_image[..., 2] += random.uniform(mini, maxi)#D
 
-#                 # Adjust layout to prevent titles from overlapping
-#                 plt.tight_layout()
+            #Make sure legit image
+            hed_image = np.clip(hed_image, 0, 1)   
+            img = hed2rgb(hed_image)
 
-#                 # Set the overall figure title (optional)
-#                 fig.suptitle("Image Comparison: Before and After HED Channel Modification", y=1.02) # y adjusts title position
+            if False:#debug
+                fig, axes = plt.subplots(1, 2, figsize=(10, 5)) # Adjust figsize as needed
+                axes[0].imshow(img_orig)
+                axes[0].set_title("Before")
+                axes[0].axis('off') # Turn off axis ticks and labels for cleaner image display
 
-#                 plt.show()
+                # Plot the "After" image on the second subplot
+                axes[1].imshow(img)
+                axes[1].set_title("After")
+                axes[1].axis('off') # Turn off axis ticks and labels
+
+                # Adjust layout to prevent titles from overlapping
+                plt.tight_layout()
+
+                # Set the overall figure title (optional)
+                fig.suptitle("Image Comparison: Before and After HED Channel Modification", y=1.02) # y adjusts title position
+
+                plt.show()
                 
-#                 exit()
-#             img = rearrange(img, 'h w c -> c h w')
-#             img = torch.from_numpy(img)
-#             img = torchvision.transforms.functional.to_pil_image(img)
+                exit()
+            img = rearrange(img, 'h w c -> c h w')
+            img = torch.from_numpy(img)
+            img = torchvision.transforms.functional.to_pil_image(img)
         
-#         if label != None:
-#             label = rearrange(label, 'c h w -> h w c')
-#             hed_image = rgb2hed(label)
-#             #Modify channels
-#             hed_image[..., 0] += random.uniform(0, total) - maxi#H
-#             hed_image[..., 1] += random.uniform(0, total) - maxi#E
-#             hed_image[..., 2] += random.uniform(0, total) - maxi#D
-#             label = rearrange(label, 'h w c -> c h w')
-#             label = torch.from_numpy(label)
+        if label != None:
+            label = rearrange(label, 'c h w -> h w c')
+            hed_image = rgb2hed(label)
+            #Modify channels
+            hed_image[..., 0] += random.uniform(0, total) - maxi#H
+            hed_image[..., 1] += random.uniform(0, total) - maxi#E
+            hed_image[..., 2] += random.uniform(0, total) - maxi#D
+            label = rearrange(label, 'h w c -> c h w')
+            label = torch.from_numpy(label)
 
-#             return img, label 
+            return img, label 
 
-#         return img
+        return img
 
 
 
@@ -138,24 +142,24 @@ class DataAugmentationDINO(object):
         color_jittering = transforms.Compose(
             [
                 transforms.RandomApply(
-                    [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
+                    #[transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
+                    [transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.05)],
                     p=0.8,
                 ),
                 transforms.RandomGrayscale(p=0.2),
             ]
         )
 
-        # Use the OpenCV-backed blur for speed
-        global_transfo1_extra = FastGaussianBlur(p=0.5) # used to be 1.0
+        global_transfo1_extra = GaussianBlur(p=1.0)
 
         global_transfo2_extra = transforms.Compose(
             [
-                FastGaussianBlur(p=0.1),
+                GaussianBlur(p=0.1),
                 #transforms.RandomSolarize(threshold=128, p=0.2),
             ]
         )
 
-        local_transfo_extra = FastGaussianBlur(p=0.5)
+        local_transfo_extra = GaussianBlur(p=0.5)
 
         # normalization
         self.normalize = transforms.Compose(
@@ -165,24 +169,27 @@ class DataAugmentationDINO(object):
             ]
         )
 
-        # # hed = hed_mod() ## SKIPPING HED AUGMENTATION
+    
+        self.global_transfo1 = transforms.Compose([hed_mod(), color_jittering, global_transfo1_extra, self.normalize])#Do we apply to everything?
+        self.global_transfo2 = transforms.Compose([hed_mod(), color_jittering, global_transfo2_extra, self.normalize])
+        self.local_transfo = transforms.Compose([hed_mod(), color_jittering, local_transfo_extra, self.normalize])
 
-        # self.global_transfo1 = transforms.Compose([color_jittering, global_transfo1_extra, self.normalize])#Do we apply to everything?
-        # self.global_transfo2 = transforms.Compose([color_jittering, global_transfo2_extra, self.normalize])
-        # # self.local_transfo = transforms.Compose([hed, color_jittering, local_transfo_extra, self.normalize])
-        # self.local_transfo = transforms.Compose([local_transfo_extra, self.normalize])
+        
+        #self.global_nohed = transforms.Compose([color_jittering, global_transfo1_extra, self.normalize])
+        #self.global_nohed2 = transforms.Compose([color_jittering, global_transfo2_extra, self.normalize])
+        #self.local_nohed = transforms.Compose([color_jittering, local_transfo_extra, self.normalize])
 
-        self.global_transfo1 = transforms.Compose([global_transfo1_extra, self.normalize])
-        self.global_transfo2 = transforms.Compose([global_transfo2_extra, self.normalize])
-        self.local_transfo = transforms.Compose([local_transfo_extra, self.normalize])
-        # self.hedonly = transforms.Compose([self.normalize])
+        self.hedonly = transforms.Compose([hed_mod(), self.normalize])
+
+
 
     def __call__(self, image):
-        output = {}
 
+        output = {}
         # global crops:
         im1_base = self.geometric_augmentation_global(image)
         global_crop_1 = self.global_transfo1(im1_base)
+
 
         im2_base = self.geometric_augmentation_global(image)
         global_crop_2 = self.global_transfo2(im2_base)
@@ -193,9 +200,14 @@ class DataAugmentationDINO(object):
         #print(global_crop_2.shape)
         from torchvision.utils import save_image
         if False:#Saving
+            image.save("original.png")
+            save_image(self.hedonly(im1_base), "global_hed.png")
+            save_image(self.hedonly(im2_base), "global2_hed.png")
+
             save_image(global_crop_1, "global.png")
             save_image(global_crop_2, "global2.png")
-            exit()
+            save_image(self.global_nohed(im1_base), "global1_nohed.png")
+            save_image(self.global_nohed2(im2_base), "global2_nohed.png")
         # global crops for teacher:
         output["global_crops_teacher"] = [global_crop_1, global_crop_2]
 
@@ -206,7 +218,26 @@ class DataAugmentationDINO(object):
         if False:
             for i, local in enumerate(local_crops):
                 save_image(local, str(i) + "local" + ".png")
+            
+            
+            local_crops_new = [
+                    self.local_nohed(self.geometric_augmentation_local(image)) for _ in range(self.local_crops_number)
+                ]
+
+            local_crops_new2 = [
+                    self.hedonly(self.geometric_augmentation_local(image)) for _ in range(self.local_crops_number)
+                ]
+
+
+            for i, local in enumerate(local_crops_new):
+                save_image(local, str(i) + "localnohed.png")
+            
+            for i, local in enumerate(local_crops_new2):
+                save_image(local, str(i) + "localhed2.png")
+
+                
             exit()
+
         output["local_crops"] = local_crops
         output["offsets"] = ()
 

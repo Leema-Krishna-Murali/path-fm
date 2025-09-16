@@ -6,13 +6,14 @@ In this repository, following a plethora of works before us, we apply DINO(V2) t
 If you are interested in helping out, check the open Issues.
 ## Installation
 
-install.sh **(Recommended)**:
-Clone the repository, and then run the provided installation script. 
+Clone the repository, cd into it, then run the provided installation script. 
 ```shell
-bash install.sh
+pip install uv
+uv sync
+source .venv/bin/activate
+cp _utils.py .venv/lib/python3.10/site-packages/eva/core/models/wrappers/
 ```
-This will create a venv in your *current* directory called 'dino_env'. It will then install the requirements into that venv.
-If you want to install in a different location, you'll need to modify both instances of 'dino_env' in the script.
+This will create a virtual environment with all necessary packages pre-installed called "pathologydino", located as a .venv folder in the same directory as path-fm.
 
 ## Training
 

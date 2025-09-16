@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source .venv/bin/activate
+CUDA_VISIBLE_DEVICES=0 torchrun --master_port=34001 --nproc_per_node=1 dinov2/train/train.py --config-file ./dinov2/configs/train/vits14_reg4.yaml --output-dir ./output_pretrained_on_test train.dataset_path=pathology:root=/teamspace/studios/this_studio/tcga/
+
+
 # Multi-node launch: 4 nodes × 8 GPUs per node
 # Usage: run this same script on each node with the SAME RDZV_HOST/RDZV_PORT/RDZV_ID
 # Example:

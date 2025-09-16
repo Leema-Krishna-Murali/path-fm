@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "pathologydino"
 version = "0.1.0"
@@ -35,4 +39,10 @@ explicit = true
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 torchaudio = { index = "pytorch-cu128" }
+<<<<<<< HEAD
 xformers = { index = "pytorch-cu128" }
+=======
+xformers = { index = "pytorch-cu128" }
+
+[tool.setuptools.packages.find]
+include = ["dinov2*"]
