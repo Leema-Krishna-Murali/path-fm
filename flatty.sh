@@ -110,7 +110,12 @@ is_text_file() {
             return 0 ;;
             
         # For unknown extensions, check if it's text
-        *) file "$file" | grep -qE '.*:.*text' ;;
+        *)
+        if [ ! -s "$file" ] || LC_ALL=C grep -Iq . -- "$file"; then
+            return 0   # looks like text
+        else
+            return 1   # probably binary
+        fi
     esac
 }
 
