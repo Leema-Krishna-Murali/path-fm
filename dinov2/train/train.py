@@ -538,9 +538,6 @@ def main(args):
         model.student.backbone.norm.weight = model_pretrained.norm.weight
         model.student.backbone.norm.bias = model_pretrained.norm.bias 
 
-    model.prepare_for_distributed_training()
-
-
     #What we are going to try right now is freezing everything *Except* position embeddings and new params
     model.prepare_for_distributed_training()
     if False:#Test partial freeze
