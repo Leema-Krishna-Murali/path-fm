@@ -16,7 +16,6 @@ from skimage.color import rgb2hed, hed2rgb
 import torch
 from einops import rearrange, reduce, repeat
 import random
-import matplotlib.pyplot as plt
 logger = logging.getLogger("dinov2")
 
 import torchvision
@@ -51,6 +50,7 @@ class hed_mod(torch.nn.Module):
             img = hed2rgb(hed_image)
 
             if False:#debug
+                import matplotlib.pyplot as plt
                 fig, axes = plt.subplots(1, 2, figsize=(10, 5)) # Adjust figsize as needed
                 axes[0].imshow(img_orig)
                 axes[0].set_title("Before")
