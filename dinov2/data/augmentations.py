@@ -10,16 +10,18 @@ from torchvision import transforms
 from .transforms import (
     GaussianBlur,
     make_normalize_transform,
+    IMAGENET_DEFAULT_MEAN,
+    IMAGENET_DEFAULT_STD,
 )
 from skimage.color import rgb2hed, hed2rgb
 
 import torch
 from einops import rearrange, reduce, repeat
 import random
-import matplotlib.pyplot as plt
 logger = logging.getLogger("dinov2")
 
 import torchvision
+import os
 
 class hed_mod(torch.nn.Module):
 
@@ -51,6 +53,7 @@ class hed_mod(torch.nn.Module):
             img = hed2rgb(hed_image)
 
             if False:#debug
+                import matplotlib.pyplot as plt
                 fig, axes = plt.subplots(1, 2, figsize=(10, 5)) # Adjust figsize as needed
                 axes[0].imshow(img_orig)
                 axes[0].set_title("Before")
@@ -98,12 +101,27 @@ class DataAugmentationDINO(object):
         local_crops_number,
         global_crops_size=224,
         local_crops_size=96,
+        save_global_dir: str | None = None,
+        save_global_prefix: str = "global",
+        save_global_ext: str = "png",
     ):
         self.global_crops_scale = global_crops_scale
         self.local_crops_scale = local_crops_scale
         self.local_crops_number = local_crops_number
         self.global_crops_size = global_crops_size
         self.local_crops_size = local_crops_size
+
+        # Optional saving config
+        self.save_global_dir = save_global_dir
+        self.save_global_prefix = save_global_prefix
+        self.save_global_ext = save_global_ext
+        self._save_call_index = 0
+        if self.save_global_dir:
+            os.makedirs(self.save_global_dir, exist_ok=True)
+
+        # For denormalization when saving
+        self._norm_mean = torch.tensor(IMAGENET_DEFAULT_MEAN).view(1, 3, 1, 1)
+        self._norm_std = torch.tensor(IMAGENET_DEFAULT_STD).view(1, 3, 1, 1)
 
         logger.info("###################################")
         logger.info("Using data augmentation parameters:")
@@ -180,6 +198,22 @@ class DataAugmentationDINO(object):
         global_crop_2 = self.global_transfo2(im2_base)
 
         output["global_crops"] = [global_crop_1, global_crop_2]
+        
+        # Optionally save global crops with unique filenames per call
+        if self.save_global_dir:
+            mean = self._norm_mean.to(global_crop_1.device, dtype=global_crop_1.dtype)
+            std = self._norm_std.to(global_crop_1.device, dtype=global_crop_1.dtype)
+            # Denormalize and clamp
+            g1 = (global_crop_1.unsqueeze(0) * std) + mean
+            g2 = (global_crop_2.unsqueeze(0) * std) + mean
+            g1 = g1.clamp(0, 1).cpu()
+            g2 = g2.clamp(0, 1).cpu()
+            idx = self._save_call_index
+            f1 = os.path.join(self.save_global_dir, f"{self.save_global_prefix}_{idx:08d}_v1.{self.save_global_ext}")
+            f2 = os.path.join(self.save_global_dir, f"{self.save_global_prefix}_{idx:08d}_v2.{self.save_global_ext}")
+            torchvision.utils.save_image(g1, f1)
+            torchvision.utils.save_image(g2, f2)
+            self._save_call_index += 1
         
         #print("gloabl crop shapes", global_crop_1.shape)
         #print(global_crop_2.shape)
