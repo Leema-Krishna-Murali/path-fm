@@ -17,17 +17,22 @@ student:
   arch: vit_giant2
   patch_size: 14
   drop_path_rate: 0.4
-  ffn_layer: mlp
+    #ffn_layer: mlp
+  ffn_layer: swiglufused
+
   block_chunks: 4
   num_register_tokens: 4
     #  pretrained_weights: /home/dkaplan/.cache/torch/hub/checkpoints/dinov2_vits14_reg4_pretrain.pth
 teacher:
   momentum_teacher: 0.994
 optim:
-  epochs: 50000
+  epochs: 8000
   weight_decay_end: 0.2
   base_lr: 2.0e-04  # learning rate for a batch size of 1024
-    #warmup_epochs: 80
+  #Swapping from 3.5e-4 to 2.0e-4
+  #They us 2e-4 for bs 1024, midnight uses 3.5e-4...
+  #
+  warmup_epochs: 10
   layerwise_decay: 1.0
 crops:
   local_crops_size: 98

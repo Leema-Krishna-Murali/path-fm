@@ -25,7 +25,7 @@ from dinov2.train.ssl_meta_arch import SSLMetaArch
 
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
 logger = logging.getLogger("dinov2")
-
+import wandb
 
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("DINOv2 training", add_help=add_help)
@@ -146,6 +146,15 @@ def do_train(cfg, model, resume=False):
         teacher_temp_schedule,
         last_layer_lr_schedule,
     ) = build_schedulers(cfg)
+    
+    from omegaconf import OmegaConf
+    if distributed.is_main_process():
+        run = wandb.init(
+            project="midnight-rep",  # Specify your project
+            config = OmegaConf.to_container(cfg)
+        )
+
+
 
     # checkpointer
     checkpointer = FSDPCheckpointer(model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True)
@@ -203,9 +212,9 @@ def do_train(cfg, model, resume=False):
         dataset=dataset,
         batch_size=cfg.train.batch_size_per_gpu,
         num_workers=cfg.train.num_workers,
-#        num_workers = 0,
+        #num_workers = 1,
         shuffle=True,
-        seed=start_iter,  # TODO: Fix this -- cfg.train.seed
+        seed=0,
         sampler_type=sampler_type,
         sampler_advance=0,  # TODO(qas): fix this -- start_iter * cfg.train.batch_size_per_gpu,
         drop_last=True,
@@ -221,7 +230,7 @@ def do_train(cfg, model, resume=False):
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
 
-    
+    import time
     for data in metric_logger.log_every(
         data_loader,
         10,
@@ -229,10 +238,20 @@ def do_train(cfg, model, resume=False):
         max_iter,
         start_iter,
     ):
+        start = time.time() 
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+
+        
         current_batch_size = data["collated_global_crops"].shape[0] / 2
         if iteration > max_iter:
             return
-
+        
+        if iteration == 5010:
+            for param in model.parameters():
+                param.requires_grad = True
+        
         # apply schedules
 
         lr = lr_schedule[iteration]
@@ -245,6 +264,7 @@ def do_train(cfg, model, resume=False):
         # compute losses
 
         optimizer.zero_grad(set_to_none=True)
+
         loss_dict = model.forward_backward(data, teacher_temp=teacher_temp)
 
         # clip gradients
@@ -284,15 +304,37 @@ def do_train(cfg, model, resume=False):
         metric_logger.update(last_layer_lr=last_layer_lr)
         metric_logger.update(current_batch_size=current_batch_size)
         metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
+        
+        if distributed.is_main_process():
+            wandb.log({"Learning Rate":lr,
+                        "Momentum": mom,
+                        "Last Layer LR": last_layer_lr,
+                        "Learning Rate":lr,
+                        "Total Loss":losses_reduced
+                })
+            wandb.log(loss_dict)
 
+
+        
         # checkpointing and testing
-
-        if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0:
+        
+        end_event.record()
+    
+        # Synchronize the GPU to ensure all operations are complete before measuring
+        torch.cuda.synchronize()
+        # Calculate and print the elapsed time
+        elapsed_ms = start_event.elapsed_time(end_event)
+#        print(f"Time elapsed for matmul: {elapsed_ms:.2f} ms")
+        
+        #Save instantly
+        if cfg.evaluation.eval_period_iterations >= 0 and (iteration) % cfg.evaluation.eval_period_iterations == 0:
             do_test(cfg, model, f"training_{iteration}")
             torch.cuda.synchronize()
         periodic_checkpointer.step(iteration)
 
         iteration = iteration + 1
+        end = time.time()
+        print(end - start)
     metric_logger.synchronize_between_processes()
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
@@ -302,12 +344,27 @@ def main(args):
 
     model = SSLMetaArch(cfg).to(torch.device("cuda"))
     #Load model here from pretrained.
-    if cfg.train.use_pretrained and "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
-        print("load small")
-        model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
+    if True:#cfg.train.use_pretrained and "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
+        print("load giant") 
+#        model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
+        
+        model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitg14_reg')
         model_pretrained = model_pretrained.to(torch.device("cuda"))
         model.student.backbone.patch_embed.proj.weight = model_pretrained.patch_embed.proj.weight
+        model.student.backbone.patch_embed.proj.bias = model_pretrained.patch_embed.proj.bias
+        model.student.backbone.cls_token = model_pretrained.cls_token
+        model.student.backbone.register_tokens = model_pretrained.register_tokens
+        model.student.backbone.mask_token = model_pretrained.mask_token
 
+        print(model.state_dict().keys())
+        print(model_pretrained.state_dict().keys())
+        print(model_pretrained.pos_embed.shape)#1, 1360, 384. We lose the pos embed because it was 518.
+        print(model.student.backbone.pos_embed.shape)#1, 257, 384
+          
+        
+
+        #We need to make sure we grab *all* of the keys.
+        #exit()
         #For each block, copy weights over.
         layers = []
         for layer in model_pretrained.blocks:
@@ -319,17 +376,61 @@ def main(args):
                     #So we have the subblock, now we need to convert
                     current = layers.pop(0)
                     sublayer.norm1.weight = current.norm1.weight
+                    sublayer.norm1.bias = current.norm1.bias
+                    
                     sublayer.attn.qkv.weight = current.attn.qkv.weight
+                    #
+                    sublayer.attn.qkv.bias =  current.attn.qkv.bias
+
                     sublayer.attn.proj.weight = current.attn.proj.weight
+                    
+                    #
+                    sublayer.attn.proj.bias = current.attn.proj.bias
+
+
                     sublayer.norm2.weight = current.norm2.weight
-                    sublayer.mlp.fc1.weight = current.mlp.fc1.weight
-                    sublayer.mlp.fc2.weight = current.mlp.fc2.weight
+                    
+                    #
+                    sublayer.norm2.bias = current.norm2.bias
+                    try:
+                        sublayer.mlp.fc1.weight = current.mlp.fc1.weight
+                        sublayer.mlp.fc2.weight = current.mlp.fc2.weight
+                        sublayer.mlp.fc1.bias = current.mlp.fc1.bias
+                        sublayer.mlp.fc2.bias = current.mlp.fc2.bias
+                    except:
+                        sublayer.mlp.w12.weight = current.mlp.w12.weight
+                        sublayer.mlp.w12.bias = current.mlp.w12.bias
+
+                        sublayer.mlp.w3.weight = current.mlp.w3.weight
+                        sublayer.mlp.w3.bias = current.mlp.w3.bias
+                        
+
+
+
+                    sublayer.ls1.gamma = current.ls1.gamma
+                    sublayer.ls2.gamma = current.ls2.gamma
+
 
         model.student.backbone.norm.weight = model_pretrained.norm.weight
+        
+        #
+        model.student.backbone.norm.bias = model_pretrained.norm.bias 
 
+        #The temp sucess was norm bias off.
+    
+    #What we are going to try right now is freezing everything *Except* position embeddings and new params
     model.prepare_for_distributed_training()
+    if True:#Test partial freeze
+        for param in model.parameters():
+            param.requires_grad = False
+        for param in model.student.ibot_head.parameters():
+            param.requires_grad = True
+        for param in model.student.dino_head.parameters():
+            param.requires_grad = True
+        model.student.backbone.pos_embed.requires_grad = True
 
     logger.info("Model:\n{}".format(model))
+
     if args.eval_only:
         iteration = (
             FSDPCheckpointer(model, save_dir=cfg.train.output_dir)
