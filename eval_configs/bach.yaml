@@ -4,7 +4,7 @@ trainer:
   init_args:
     n_runs: &N_RUNS ${oc.env:N_RUNS, 5}
     default_root_dir: &OUTPUT_ROOT ${oc.env:OUTPUT_ROOT, logs/${oc.env:MODEL_NAME, dino_vits16}/offline/bach}
-    max_steps: &MAX_STEPS ${oc.env:MAX_STEPS, 6000} #usually 12500
+    max_steps: &MAX_STEPS ${oc.env:MAX_STEPS, 12500}
     checkpoint_type: ${oc.env:CHECKPOINT_TYPE, best}
     callbacks:
       - class_path: eva.callbacks.ConfigurationLogger
@@ -38,11 +38,10 @@ trainer:
             init_args:
               path: torch.hub.load
               arguments:
-                repo_or_dir: facebookresearch/dinov2
-                model: dinov2_vitg14_reg #dino_vits16
+                repo_or_dir: facebookresearch/dinov2 #facebookresearch/dino:main
+                model: dinov2_vitg14_reg #dinov2_vits14_reg #dino_vits16
                 pretrained: true
-                  #checkpoint_path: ./dinov3_vits16_pretrain_lvd1689m-08c60483.pth
-                  #checkpoint_path: ./old/output_pretrained_on/eval/training_12500/teacher_checkpoint.pth
+              checkpoint_path: ./output_pretrained_giant/eval/training_175000/teacher_checkpoint.pth
 
           overwrite: true
     logger:
@@ -56,13 +55,13 @@ model:
     head:
       class_path: torch.nn.Linear
       init_args:
-        in_features: ${oc.env:IN_FEATURES, 257280} #MODIFY ME
+        in_features: ${oc.env:IN_FEATURES, 1536}
         out_features: &NUM_CLASSES 4
     criterion: torch.nn.CrossEntropyLoss
     optimizer:
       class_path: torch.optim.AdamW
       init_args:
-        lr: ${oc.env:LR_VALUE, 0.0001}
+        lr: ${oc.env:LR_VALUE, 0.0003}
     metrics:
       common:
         - class_path: eva.metrics.AverageLoss

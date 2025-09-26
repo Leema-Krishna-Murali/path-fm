@@ -1,29 +1,20 @@
-[tool.black]
-line-length = 120
-
-[tool.pylint.master]
-persistent = false
-score = false
-
-[tool.pylint.messages_control]
-disable = "all"
-enable = [
-  "miscellaneous",
-  "similarities",
-]
-
-[tool.pylint.similarities]
-ignore-comments = true
-ignore-docstrings = true
-ignore-imports = true
-min-similarity-lines = 8
-
-[tool.pylint.reports]
-reports = false
-
-[tool.pylint.miscellaneous]
-notes = [
-  "FIXME",
-  "XXX",
-  "TODO",
+[project]
+name = "pathologydino"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = "==3.10.12"
+dependencies = [
+    "einops>=0.8.1",
+    "fvcore>=0.1.5.post20221221",
+    "iopath>=0.1.10",
+    "matplotlib>=3.10.5",
+    "omegaconf>=2.3.0",
+    "opencv-python>=4.12.0.88",
+    "openslide-bin>=4.0.0.8",
+    "openslide-python>=1.4.2",
+    "scikit-image>=0.25.2",
+    "submitit>=1.5.3",
+    "torchmetrics>=1.8.0",
+    "wandb>=0.21.0",
 ]

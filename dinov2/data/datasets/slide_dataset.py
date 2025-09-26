@@ -16,6 +16,10 @@ import numpy as np
 import cv2
 import random
 
+
+import torch
+import torchvision.transforms as transforms
+
 class SlideDataset(ExtendedVisionDataset):
     def __init__(self, root, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)  # type: ignore
@@ -110,6 +114,12 @@ class SlideDataset(ExtendedVisionDataset):
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         debug = False
+
+        if False:#Speed test
+            
+            test_data = torch.randn((3, 224, 224))
+            return self.transforms(transforms.ToPILImage()(test_data), None), index
+
         if True:
             path = self.image_files[index]
             
@@ -136,8 +146,9 @@ class SlideDataset(ExtendedVisionDataset):
 
         res = patch.convert("RGB")#Removes alpha - not sure this is the best way to do this thuogh
         if self.transforms is not None:
-            return self.transforms(res, None)
-        return res, None
+            return self.transforms(res, None), index
+
+        return res, None, index
         
     def hsv(self, tile_rgb, patch_size):
         

@@ -40,8 +40,8 @@ class hed_mod(torch.nn.Module):
             img_orig = img
             hed_image = rgb2hed(img)
             #Modify channels, each with random amount, between -.05 and .05
-            mini = 0# -.01
-            maxi = 0#.01
+            mini =  -.05
+            maxi = .05
             if False:
                 hed_image[..., 0] *= (1 + random.uniform(mini, maxi))#H
                 hed_image[..., 1] *= (1 + random.uniform(mini, maxi))#E
@@ -142,7 +142,8 @@ class DataAugmentationDINO(object):
         color_jittering = transforms.Compose(
             [
                 transforms.RandomApply(
-                    [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
+                    #[transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
+                    [transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.05)],
                     p=0.8,
                 ),
                 transforms.RandomGrayscale(p=0.2),
@@ -183,8 +184,8 @@ class DataAugmentationDINO(object):
 
 
     def __call__(self, image):
-        output = {}
 
+        output = {}
         # global crops:
         im1_base = self.geometric_augmentation_global(image)
         global_crop_1 = self.global_transfo1(im1_base)

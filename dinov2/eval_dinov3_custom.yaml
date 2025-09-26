@@ -54,7 +54,7 @@ model:
   class_path: eva.HeadModule
   init_args:
     head:
-      class_path: torch.nn.Linear
+      class_path: pathologyDino.batch_linear.batch_linear
       init_args:
         in_features: ${oc.env:IN_FEATURES, 257280} #MODIFY ME
         out_features: &NUM_CLASSES 4

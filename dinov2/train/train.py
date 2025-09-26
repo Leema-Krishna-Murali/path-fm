@@ -159,7 +159,24 @@ def do_train(cfg, model, resume=False):
     # checkpointer
     checkpointer = FSDPCheckpointer(model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True)
 
+    #This is where we resume. This error is veyr strange thuogh...
     start_iter = checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
+    """W20250825 03:00:27 4071999 fvcore.common.checkpoint checkpoint.py:352] The checkpoint state_dict contains keys that are not used by the model:
+  student.backbone._flat_param
+  student.backbone.blocks.0._flat_param
+  student.backbone.blocks.1._flat_param
+  student.backbone.blocks.2._flat_param
+  student.backbone.blocks.3._flat_param
+  student.dino_head._flat_param
+  student.ibot_head._flat_param
+  teacher.backbone._flat_param
+  teacher.backbone.blocks.0._flat_param
+  teacher.backbone.blocks.1._flat_param
+  teacher.backbone.blocks.2._flat_param
+  teacher.backbone.blocks.3._flat_param
+  teacher.dino_head._flat_param
+  teacher.ibot_head._flat_param
+    """
 
     OFFICIAL_EPOCH_LENGTH = cfg.train.OFFICIAL_EPOCH_LENGTH
     max_iter = cfg.optim.epochs * OFFICIAL_EPOCH_LENGTH
@@ -248,10 +265,33 @@ def do_train(cfg, model, resume=False):
         if iteration > max_iter:
             return
         
-        if iteration == 5010:
-            for param in model.parameters():
-                param.requires_grad = True
         
+        nan_mask = torch.isnan(data["collated_global_crops"])
+        nan_mask2 = torch.isnan(data["collated_local_crops"])
+        if nan_mask.any():
+            print("found nan in input data")
+            print(data[indexes])
+
+        #print(iteration)                
+        if False:#iteration >= 5:
+            for param in model.student.parameters():
+                #param.requires_grad = True
+                #print(param.requires_grad)
+                pass
+    
+
+        #print(model.student.state_dict()["backbone.blocks.3.39.mlp.w3.weight"])
+
+        """('blocks.39.mlp.w3.weight', tensor([[ 0.0145,  0.0102, -0.0075,  ...,  0.0025,  0.0162,  0.0146],
+        [ 0.0015, -0.0079,  0.0181,  ...,  0.0037,  0.0301, -0.0089],
+        [-0.0077,  0.0127,  0.0074,  ...,  0.0132,  0.0061,  0.0082],
+        ...,
+        [ 0.0156, -0.0084, -0.0005,  ...,  0.0077, -0.0128,  0.0289],
+        [ 0.0142, -0.0018, -0.0119,  ...,  0.0161, -0.0073, -0.0182],
+        [ 0.0074, -0.0029,  0.0077,  ...,  0.0101,  0.0153,  0.0015]])), ('blocks.39.mlp.w3.bias', tensor([ 0.0705,  0.0458,  0.2556,  ...,  0.0438, -0.3111,  0.0612])), ('blocks.39.ls2.gamma', tensor([ 1.3992,  1.5559,  1.5517,  ..., -1.3399,  1.5802, -1.3920])), ('norm.weight', tensor([1.4095, 1.3542, 1.3573,  ..., 1.5707, 1.3855, 1.3519])), ('norm.bias', tensor([-0.2394, -0.0710,  0.1110,  ...,  0.1224,  0.1527,  0.0536]))])
+        """
+        
+
         # apply schedules
 
         lr = lr_schedule[iteration]
@@ -294,7 +334,14 @@ def do_train(cfg, model, resume=False):
         loss_dict_reduced = {k: v.item() / distributed.get_global_size() for k, v in loss_dict.items()}
 
         if math.isnan(sum(loss_dict_reduced.values())):
+            print(sum(loss_dict_reduced.values()))
             logger.info("NaN detected")
+            print(data["indexes"])
+            
+            for name, param in model.named_parameters():
+                if torch.isnan(param.data).any():
+                    print(f"NaNs found in parameter: {name}")
+
             raise AssertionError
         losses_reduced = sum(loss for loss in loss_dict_reduced.values())
 
@@ -324,7 +371,7 @@ def do_train(cfg, model, resume=False):
         torch.cuda.synchronize()
         # Calculate and print the elapsed time
         elapsed_ms = start_event.elapsed_time(end_event)
-#        print(f"Time elapsed for matmul: {elapsed_ms:.2f} ms")
+        print(f"Time elapsed for matmul: {elapsed_ms:.2f} ms")
         
         #Save instantly
         if cfg.evaluation.eval_period_iterations >= 0 and (iteration) % cfg.evaluation.eval_period_iterations == 0:
@@ -341,14 +388,15 @@ def do_train(cfg, model, resume=False):
 
 def main(args):
     cfg = setup(args)
-
+    print(cfg)
     model = SSLMetaArch(cfg).to(torch.device("cuda"))
     #Load model here from pretrained.
     if True:#cfg.train.use_pretrained and "\'arch\': \'vit_small\'" in str(cfg):#Temporary check
         print("load giant") 
-#        model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
+        #model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')#, force_reload = True)
         
         model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitg14_reg')
+        
         model_pretrained = model_pretrained.to(torch.device("cuda"))
         model.student.backbone.patch_embed.proj.weight = model_pretrained.patch_embed.proj.weight
         model.student.backbone.patch_embed.proj.bias = model_pretrained.patch_embed.proj.bias
@@ -360,8 +408,17 @@ def main(args):
         print(model_pretrained.state_dict().keys())
         print(model_pretrained.pos_embed.shape)#1, 1360, 384. We lose the pos embed because it was 518.
         print(model.student.backbone.pos_embed.shape)#1, 257, 384
-          
-        
+
+
+        #Interpolate pos embed
+        if True:#small only
+            source = model_pretrained.pos_embed.transpose(1, 2)
+            size = model.student.backbone.pos_embed.shape[1]
+            interpolated = torch.nn.functional.interpolate(source, size=size, mode='linear', align_corners=False)
+            interpolated_embeddings = interpolated.transpose(1, 2)
+            model.student.pos_embed = interpolated_embeddings
+        else:
+            model.student.pos_embed = model_pretrained.pos_embed
 
         #We need to make sure we grab *all* of the keys.
         #exit()
@@ -397,14 +454,13 @@ def main(args):
                         sublayer.mlp.fc2.weight = current.mlp.fc2.weight
                         sublayer.mlp.fc1.bias = current.mlp.fc1.bias
                         sublayer.mlp.fc2.bias = current.mlp.fc2.bias
-                    except:
+                    except:#Not very clean, needs improvement
                         sublayer.mlp.w12.weight = current.mlp.w12.weight
                         sublayer.mlp.w12.bias = current.mlp.w12.bias
 
                         sublayer.mlp.w3.weight = current.mlp.w3.weight
                         sublayer.mlp.w3.bias = current.mlp.w3.bias
                         
-
 
 
                     sublayer.ls1.gamma = current.ls1.gamma
@@ -418,16 +474,23 @@ def main(args):
 
         #The temp sucess was norm bias off.
     
+    #TODO: When we resume, we don't want to load anything from here, or freeze anything either.
+
+
+
     #What we are going to try right now is freezing everything *Except* position embeddings and new params
     model.prepare_for_distributed_training()
-    if True:#Test partial freeze
-        for param in model.parameters():
+    if False:#Test partial freeze
+        for param in model.student.parameters():
             param.requires_grad = False
         for param in model.student.ibot_head.parameters():
             param.requires_grad = True
         for param in model.student.dino_head.parameters():
             param.requires_grad = True
-        model.student.backbone.pos_embed.requires_grad = True
+
+
+        if False:#For giant, we don't need to tune this
+            model.student.backbone.pos_embed.requires_grad = True
 
     logger.info("Model:\n{}".format(model))
 
