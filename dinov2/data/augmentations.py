@@ -136,7 +136,7 @@ class DataAugmentationDINO(object):
                 # ),
 
                 ## Replacing RandomResizedCrop by RandomCrop (inspired by Virchow2 ECT)
-                transforms.RandomResizedCrop(
+                transforms.RandomCrop(
                     local_crops_size
                 ),
                 transforms.RandomHorizontalFlip(p=0.5),
