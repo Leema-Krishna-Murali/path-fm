@@ -4,12 +4,17 @@
 # found in the LICENSE file in the root directory of this source tree.
 
 import logging
+import os
+from typing import List
 
 from torchvision import transforms
+from torchvision.utils import save_image, make_grid
 
 from .transforms import (
     GaussianBlur,
     make_normalize_transform,
+    IMAGENET_DEFAULT_MEAN,
+    IMAGENET_DEFAULT_STD,
 )
 from skimage.color import rgb2hed, hed2rgb
 
@@ -20,6 +25,7 @@ import matplotlib.pyplot as plt
 logger = logging.getLogger("dinov2")
 
 import torchvision
+import dinov2.distributed as distributed
 
 class hed_mod(torch.nn.Module):
 
@@ -98,12 +104,26 @@ class DataAugmentationDINO(object):
         local_crops_number,
         global_crops_size=224,
         local_crops_size=96,
+        # Debug/visualization options
+        save_crops: bool = False,
+        save_dir: str = None,
+        save_first_n: int = None,
     ):
         self.global_crops_scale = global_crops_scale
         self.local_crops_scale = local_crops_scale
         self.local_crops_number = local_crops_number
         self.global_crops_size = global_crops_size
         self.local_crops_size = local_crops_size
+
+        # Saving/visualization configuration
+        self.save_crops = save_crops
+        self.save_first_n = save_first_n
+        self.save_dir = (
+            save_dir if save_dir is not None else os.path.join(os.getcwd(), "crops_debug")
+        )
+        self._save_counter = 0
+        if self.save_crops:
+            os.makedirs(self.save_dir, exist_ok=True)
 
         logger.info("###################################")
         logger.info("Using data augmentation parameters:")
@@ -179,6 +199,44 @@ class DataAugmentationDINO(object):
         self.global_transfo2 = transforms.Compose([color_jittering, global_transfo2_extra, self.normalize])
         self.local_transfo = transforms.Compose([hed, color_jittering, local_transfo_extra, self.normalize])
 
+    def _denormalize(self, tensor_img: torch.Tensor) -> torch.Tensor:
+        """Convert normalized tensor back to [0,1] range for visualization."""
+        mean = torch.tensor(IMAGENET_DEFAULT_MEAN, dtype=tensor_img.dtype, device=tensor_img.device).view(3, 1, 1)
+        std = torch.tensor(IMAGENET_DEFAULT_STD, dtype=tensor_img.dtype, device=tensor_img.device).view(3, 1, 1)
+        return (tensor_img * std + mean).clamp(0.0, 1.0)
+
+    def _maybe_save_crops(self, global1: torch.Tensor, global2: torch.Tensor, local_crops: List[torch.Tensor]):
+        if not self.save_crops:
+            return
+        if self.save_first_n is not None and self._save_counter >= self.save_first_n:
+            return
+        try:
+            if hasattr(distributed, "is_main_process") and not distributed.is_main_process():
+                return
+        except Exception:
+            # If distributed is not initialized, continue and save
+            pass
+
+        os.makedirs(self.save_dir, exist_ok=True)
+        sample_id = f"{self._save_counter:06d}_{os.getpid()}"
+
+        # Save separate images
+        save_image(self._denormalize(global1), os.path.join(self.save_dir, f"{sample_id}_global_1.png"))
+        save_image(self._denormalize(global2), os.path.join(self.save_dir, f"{sample_id}_global_2.png"))
+        for i, local in enumerate(local_crops):
+            save_image(self._denormalize(local), os.path.join(self.save_dir, f"{sample_id}_local_{i+1}.png"))
+
+        # Save a quick grid for at-a-glance view
+        try:
+            grid_imgs = [self._denormalize(global1), self._denormalize(global2)] + [self._denormalize(x) for x in local_crops]
+            grid = make_grid(grid_imgs, nrow=2)
+            save_image(grid, os.path.join(self.save_dir, f"{sample_id}_grid.png"))
+        except Exception:
+            # If grid construction fails for any reason, skip it silently
+            pass
+
+        self._save_counter += 1
+
     def __call__(self, image):
         output = {}
 
@@ -209,5 +267,8 @@ class DataAugmentationDINO(object):
             exit()
         output["local_crops"] = local_crops
         output["offsets"] = ()
+
+        # Optionally save crops for visual verification
+        self._maybe_save_crops(global_crop_1, global_crop_2, local_crops)
 
         return output
