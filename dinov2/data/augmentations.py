@@ -19,6 +19,7 @@ from .transforms import (
 from skimage.color import rgb2hed, hed2rgb
 
 import torch
+import torch.nn.functional as F
 from einops import rearrange, reduce, repeat
 import random
 import matplotlib.pyplot as plt
@@ -226,14 +227,24 @@ class DataAugmentationDINO(object):
         for i, local in enumerate(local_crops):
             save_image(self._denormalize(local), os.path.join(self.save_dir, f"{sample_id}_local_{i+1}.png"))
 
-        # Save a quick grid for at-a-glance view
-        try:
-            grid_imgs = [self._denormalize(global1), self._denormalize(global2)] + [self._denormalize(x) for x in local_crops]
-            grid = make_grid(grid_imgs, nrow=2)
-            save_image(grid, os.path.join(self.save_dir, f"{sample_id}_grid.png"))
-        except Exception:
-            # If grid construction fails for any reason, skip it silently
-            pass
+        # Save a quick grid for at-a-glance view (handles different sizes)
+        denorm_imgs = [
+            self._denormalize(global1).detach().cpu(),
+            self._denormalize(global2).detach().cpu(),
+            *[self._denormalize(x).detach().cpu() for x in local_crops],
+        ]
+        # Compute target size: max H/W across all images
+        heights = [img.shape[-2] for img in denorm_imgs]
+        widths = [img.shape[-1] for img in denorm_imgs]
+        target_h = max(heights)
+        target_w = max(widths)
+        resized_imgs = []
+        for img in denorm_imgs:
+            if img.shape[-2] != target_h or img.shape[-1] != target_w:
+                img = F.interpolate(img.unsqueeze(0), size=(target_h, target_w), mode="bilinear", align_corners=False).squeeze(0)
+            resized_imgs.append(img)
+        grid = make_grid(resized_imgs, nrow=2)
+        save_image(grid, os.path.join(self.save_dir, f"{sample_id}_grid.png"))
 
         self._save_counter += 1
 
