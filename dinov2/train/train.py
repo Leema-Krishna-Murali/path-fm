@@ -187,6 +187,10 @@ def do_train(cfg, model, resume=False):
         cfg.crops.local_crops_number,
         global_crops_size=cfg.crops.global_crops_size,
         local_crops_size=cfg.crops.local_crops_size,
+        # Debug/visualization controls via env vars to avoid config churn
+        save_crops=bool(int(os.getenv("SAVE_CROPS", "0"))),
+        save_dir=os.getenv("SAVE_CROPS_DIR", os.path.join(cfg.train.output_dir, "crops_debug")),
+        save_first_n=int(os.getenv("SAVE_CROPS_FIRST_N", "20")),
     )
 
     collate_fn = partial(
