@@ -9,7 +9,7 @@ import logging
 import torch
 from torch import nn
 
-from dinov2.loss import DINOLoss, iBOTPatchLoss, KoLeoLoss, KDELoss
+from dinov2.loss import DINOLoss, iBOTPatchLoss, KoLeoLoss, KDELoss, CollapseProofLoss
 from dinov2.models import build_model_from_cfg
 from dinov2.layers import DINOHead
 from dinov2.utils.utils import has_batchnorms
@@ -53,6 +53,7 @@ class SSLMetaArch(nn.Module):
         self.do_dino = cfg.dino.loss_weight > 0
         self.do_koleo = cfg.dino.koleo_loss_weight > 0
         self.do_kde = cfg.dino.kde_loss_weight > 0
+        self.do_cp = getattr(cfg, "cp", {}).get("loss_weight", 0) > 0
         self.do_ibot = cfg.ibot.loss_weight > 0
         self.ibot_separate_head = cfg.ibot.separate_head
 
@@ -114,6 +115,23 @@ class SSLMetaArch(nn.Module):
             else:
                 logger.info("OPTIONS -- IBOT -- head shared with DINO")
 
+        # Collapse-Proof regularizer
+        if self.do_cp:
+            logger.info("OPTIONS -- Collapse-Proof")
+            logger.info(f"OPTIONS -- CP -- loss_weight: {cfg.cp.loss_weight}")
+            self.cp_loss_weight = cfg.cp.loss_weight
+            self.cp_loss = CollapseProofLoss(
+                backend=cfg.cp.get("backend", "auto"),
+                var_weight=cfg.cp.get("var_weight", 1.0),
+                cov_weight=cfg.cp.get("cov_weight", 1.0),
+                mean_weight=cfg.cp.get("mean_weight", 0.0),
+                var_target=cfg.cp.get("var_target", 1.0),
+                eps=cfg.cp.get("eps", 1e-4),
+                cplearn_kwargs=cfg.cp.get("cplearn_kwargs", None),
+            )
+        else:
+            self.cp_loss_weight = 0.0
+
         self.need_to_synchronize_fsdp_streams = True
 
         self.student = nn.ModuleDict(student_model_dict)
@@ -153,6 +171,7 @@ class SSLMetaArch(nn.Module):
 
         do_dino = self.do_dino
         do_ibot = self.do_ibot
+        do_cp = self.do_cp
 
         # loss scales
         ibot_loss_scale = 1.0 / n_global_crops
@@ -332,6 +351,16 @@ class SSLMetaArch(nn.Module):
                 loss_dict["kde_loss"] = (
                     kde_loss / loss_scales
                 )  # this is to display the same losses as before but we can remove eventually
+
+        # Collapse-Proof on student CLS tokens (before head), both globals
+        if do_cp:
+            cp_total = 0.0
+            # We regularize each global view independently for stability
+            for p in student_global_cls_tokens.chunk(2):
+                cp_total = cp_total + self.cp_loss(p)
+            cp_total = cp_total / 2.0
+            loss_dict["cp_loss"] = cp_total
+            loss_accumulator += self.cp_loss_weight * cp_total
 
 
         if do_ibot:

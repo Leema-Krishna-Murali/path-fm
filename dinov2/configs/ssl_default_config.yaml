@@ -47,6 +47,7 @@ dino:
   head_nlayers: 3
   head_hidden_dim: 2048
   koleo_loss_weight: 0.1
+  kde_loss_weight: 0.0
 ibot:
   loss_weight: 1.0
   mask_sample_probability: 0.5
@@ -58,6 +59,15 @@ ibot:
   head_bottleneck_dim: 256
   head_nlayers: 3
   head_hidden_dim: 2048
+cp:
+  loss_weight: 0.0
+  backend: auto  # one of {auto, cplearn, builtin}
+  var_weight: 1.0
+  cov_weight: 1.0
+  mean_weight: 0.0
+  var_target: 1.0
+  eps: 1.0e-4
+  cplearn_kwargs: null
 train:
   batch_size_per_gpu: 64
   dataset_path: ImageNet:split=TRAIN
