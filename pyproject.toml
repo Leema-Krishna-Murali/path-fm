@@ -18,3 +18,11 @@ dependencies = [
     "torchmetrics>=1.8.0",
     "wandb>=0.21.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["dinov2*"]
+exclude = ["eval_configs*"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
