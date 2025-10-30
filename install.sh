@@ -22,3 +22,4 @@ uv pip install torch==2.7.1 torchvision==0.22.1 xformers --torch-backend=auto
 uv pip install 'kaiko-eva[vision]'
 
 echo "Installation complete! Python environment is setup in .venv."
+echo "Run 'wandb init' to setup your wandb credentials before training."

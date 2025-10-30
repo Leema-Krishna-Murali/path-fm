@@ -10,7 +10,7 @@ from .decoders import TargetDecoder, ImageDataDecoder
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
 from PIL import Image
-from openslide import OpenSlide#other options?
+from openslide import OpenSlide
 import random
 import numpy as np
 import cv2
@@ -58,10 +58,7 @@ class SlideDataset(ExtendedVisionDataset):
         #Finishg copying from the .py
         with open("sample_dataset_30.txt", "r") as f:
             for line in f.readlines():
-                if "tying" in line:
-                    pass
-                else:
-                    self.image_files.append(line)
+                self.image_files.append(line)
 
         print("This many resolved paths", len(self.image_files))
 

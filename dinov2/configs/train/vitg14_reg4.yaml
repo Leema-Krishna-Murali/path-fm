@@ -10,28 +10,25 @@ ibot:
   head_n_prototypes: 131072
 train:
   batch_size_per_gpu: 48
-    #  dataset_path: ImageNet22k
   centering: sinkhorn_knopp
-    # use_pretrained: True
+  use_pretrained: True
+  OFFICIAL_EPOCH_LENGTH: 1250
+  num_workers: 0 # required for HF streaming
 student:
   arch: vit_giant2
   patch_size: 14
   drop_path_rate: 0.4
-    #ffn_layer: mlp
   ffn_layer: swiglufused
-
   block_chunks: 4
   num_register_tokens: 4
-    #  pretrained_weights: /home/dkaplan/.cache/torch/hub/checkpoints/dinov2_vits14_reg4_pretrain.pth
 teacher:
   momentum_teacher: 0.994
 optim:
-  epochs: 8000
+  epochs: 8000 
+  early_stop: 200 # we want to early stop at 200 epochs to replicate SOTA ckpt
   weight_decay_end: 0.2
   base_lr: 2.0e-04  # learning rate for a batch size of 1024
   #Swapping from 3.5e-4 to 2.0e-4
-  #They us 2e-4 for bs 1024, midnight uses 3.5e-4...
-  #
   warmup_epochs: 10
   layerwise_decay: 1.0
 crops:

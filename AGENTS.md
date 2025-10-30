@@ -1,0 +1,6 @@
+- uv for environment management
+- flat organization (as few files as possible)
+- no try/except code nor fallbacks — if something is wrong, it should fail loudly
+- use less environmental variables, instead hardcode and don't support modular options nor fallbacks
+- streamlined code without worsened performance, we are aiming for as few lines of code as possible to support all features well
+- only do what you are asked to do as efficiently as possible, if there are potential issues or quality of life improvements, simply state those ideas to me, do not code them up yourself without explicit approval first
