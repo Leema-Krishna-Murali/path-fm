@@ -13,7 +13,7 @@ train:
   centering: sinkhorn_knopp
   use_pretrained: True
   OFFICIAL_EPOCH_LENGTH: 1250
-  num_workers: 0 # required for HF streaming
+  # num_workers: 1
 student:
   arch: vit_giant2
   patch_size: 14

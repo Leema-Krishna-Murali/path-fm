@@ -32,6 +32,36 @@ torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False 
 logger = logging.getLogger("dinov2")
 import wandb
 
+
+def _build_streaming_dataset(
+    dataset_path: str,
+    *,
+    shuffle_buffer: int,
+    shuffle_seed: int,
+    world_size: int,
+    global_rank: int,
+    fragment_prefetch_limit: int,
+    fragment_range_size: int,
+):
+    import pyarrow
+    import pyarrow.dataset
+
+    fragment_scan_options = pyarrow.dataset.ParquetFragmentScanOptions(
+        cache_options=pyarrow.CacheOptions(
+            prefetch_limit=fragment_prefetch_limit,
+            range_size_limit=fragment_range_size,
+        ),
+    )
+    dataset = load_dataset(
+        dataset_path,
+        streaming=True,
+        fragment_scan_options=fragment_scan_options,
+    )["train"]
+    dataset = dataset.shuffle(buffer_size=shuffle_buffer, seed=shuffle_seed)
+    if world_size > 1:
+        dataset = dataset.shard(num_shards=world_size, index=global_rank)
+    return dataset
+
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("DINOv2 training", add_help=add_help)
     parser.add_argument("--config-file", default="", metavar="FILE", help="path to config file")
@@ -186,6 +216,7 @@ def do_train(cfg, model, resume=False):
     OFFICIAL_EPOCH_LENGTH = cfg.train.OFFICIAL_EPOCH_LENGTH
     max_iter = cfg.optim.epochs * OFFICIAL_EPOCH_LENGTH
     early_stop_iter = cfg.optim.early_stop * OFFICIAL_EPOCH_LENGTH
+    eta_target_iter = min(max_iter, early_stop_iter)
 
     periodic_checkpointer = PeriodicCheckpointer(
         checkpointer,
@@ -274,14 +305,16 @@ def do_train(cfg, model, resume=False):
     #     collate_fn=collate_fn,
     # )
 
-    # Huggingface automatically puts all files into "train" split if no splits were defined
-    dataset = load_dataset("medarc/TCGA-12K-parquet", streaming=True)["train"]
-    dataset = dataset.shuffle(buffer_size=10000, seed=42)
-
-    # prevent each GPU from reading the same shuffled samples
-    world_size = distributed.get_global_size()
-    if world_size > 1:
-        dataset = dataset.shard(num_shards=world_size, index=distributed.get_global_rank())
+    dataset_builder = partial(
+        _build_streaming_dataset,
+        dataset_path="medarc/TCGA-12K-parquet",
+        shuffle_buffer=10000,
+        shuffle_seed=42,
+        world_size=distributed.get_global_size(),
+        global_rank=distributed.get_global_rank(),
+        fragment_prefetch_limit=1,
+        fragment_range_size=128 << 20,
+    )
 
     def decode_and_transform(item):
         image_file = BytesIO(item["image_bytes"])
@@ -292,21 +325,20 @@ def do_train(cfg, model, resume=False):
         return (transformed, None), slide_meta
 
     class _TransformedStreamingDataset(torch.utils.data.IterableDataset):
-        def __init__(self, source, transform):
-            self._source = source
+        def __init__(self, dataset_builder, transform):
+            self._dataset_builder = dataset_builder
             self._transform = transform
 
         def __iter__(self):
-            source = self._source
-            # prevent same-GPU workers from re-reading the exact same samples
-            if cfg.train.num_workers > 1:
-                worker_info = torch.utils.data.get_worker_info()
-                if worker_info is not None:
-                    source = source.shard(num_shards=worker_info.num_workers, index=worker_info.id)
+            # Build the HF streaming dataset inside the worker process to keep file handles valid.
+            source = self._dataset_builder()
+            worker_info = torch.utils.data.get_worker_info()
+            if worker_info is not None and worker_info.num_workers > 1:
+                source = source.shard(num_shards=worker_info.num_workers, index=worker_info.id)
             for sample in source:
                 yield self._transform(sample)
 
-    dataset = _TransformedStreamingDataset(dataset, decode_and_transform)
+    dataset = _TransformedStreamingDataset(dataset_builder, decode_and_transform)
 
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -331,7 +363,7 @@ def do_train(cfg, model, resume=False):
         data_loader,
         10,
         header,
-        max_iter,
+        eta_target_iter,
         start_iter,
     ):
         if iteration >= early_stop_iter:
@@ -434,7 +466,7 @@ def do_train(cfg, model, resume=False):
         torch.cuda.synchronize()
         # Calculate and print the elapsed time
         elapsed_ms = start_event.elapsed_time(end_event)
-        print(f"Time elapsed for matmul: {elapsed_ms:.2f} ms")
+        # print(f"Time elapsed for matmul: {elapsed_ms:.2f} ms")
         
         #Save instantly
         if cfg.evaluation.eval_period_iterations >= 0 and (iteration) % cfg.evaluation.eval_period_iterations == 0:
@@ -444,7 +476,7 @@ def do_train(cfg, model, resume=False):
 
         iteration = iteration + 1
         end = time.time()
-        print(end - start)
+        # print(end - start)
     metric_logger.synchronize_between_processes()
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 

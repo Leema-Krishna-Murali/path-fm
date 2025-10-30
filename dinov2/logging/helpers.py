@@ -81,6 +81,7 @@ class MetricLogger(object):
             header,
             "[{0" + space_fmt + "}/{1}]",
             "eta: {eta}",
+            "gap: {delta}",
             "{meters}",
             "time: {time}",
             "data: {data}",
@@ -90,11 +91,18 @@ class MetricLogger(object):
 
         log_msg = self.delimiter.join(log_list)
         MB = 1024.0 * 1024.0
+        last_log_time = None
         for obj in iterable:
             data_time.update(time.time() - end)
             yield obj
             iter_time.update(time.time() - end)
             if i % print_freq == 0 or i == n_iterations - 1:
+                current_log_time = time.time()
+                if last_log_time is None:
+                    delta_ms_str = "N/A"
+                else:
+                    delta_ms_str = f"{(current_log_time - last_log_time) * 1000.0:.2f} ms"
+                last_log_time = current_log_time
                 self.dump_in_output_file(iteration=i, iter_time=iter_time.avg, data_time=data_time.avg)
                 eta_seconds = iter_time.global_avg * (n_iterations - i)
                 eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
@@ -104,6 +112,7 @@ class MetricLogger(object):
                             i,
                             n_iterations,
                             eta=eta_string,
+                            delta=delta_ms_str,
                             meters=str(self),
                             time=str(iter_time),
                             data=str(data_time),
@@ -116,6 +125,7 @@ class MetricLogger(object):
                             i,
                             n_iterations,
                             eta=eta_string,
+                            delta=delta_ms_str,
                             meters=str(self),
                             time=str(iter_time),
                             data=str(data_time),

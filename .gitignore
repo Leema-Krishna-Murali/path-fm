@@ -9,3 +9,5 @@ dist/
 *.swp
 
 .vscode/
+
+sample_dataset_30.txt
