@@ -368,6 +368,10 @@ def do_train(cfg, model, resume=False):
     ):
         if iteration >= early_stop_iter:
             logger.info("Early stopping at iteration {}".format(iteration))
+            if cfg.evaluation.eval_period_iterations >= 0:
+                do_test(cfg, model, f"training_{iteration}")
+                torch.cuda.synchronize()
+            checkpointer.save(f"model_{iteration:07d}", iteration=iteration)
             break
         start = time.time() 
         start_event = torch.cuda.Event(enable_timing=True)
