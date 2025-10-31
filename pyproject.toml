@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = "==3.10.12"
 dependencies = [
     "einops>=0.8.1",
+    "datasets>=2.20.0",
     "fvcore>=0.1.5.post20221221",
     "iopath>=0.1.10",
     "litdata>=0.2.58",
@@ -19,6 +20,14 @@ dependencies = [
     "submitit>=1.5.3",
     "torchmetrics>=1.8.0",
     "wandb>=0.21.0",
+    "huggingface-hub>=0.23.0",
+]
+
+[project.optional-dependencies]
+accelerated = [
+    "torch",
+    "torchvision",
+    "xformers",
 ]
 
 [tool.setuptools.packages.find]
