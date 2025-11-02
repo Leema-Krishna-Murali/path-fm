@@ -9,7 +9,6 @@ dependencies = [
     "datasets>=2.20.0",
     "fvcore>=0.1.5.post20221221",
     "iopath>=0.1.10",
-    "litdata>=0.2.58",
     "matplotlib",
     "omegaconf>=2.3.0",
     "opencv-python>=4.12.0.88",
@@ -20,20 +19,19 @@ dependencies = [
     "submitit>=1.5.3",
     "torchmetrics>=1.8.0",
     "wandb>=0.21.0",
-    "huggingface-hub>=0.23.0",
-]
-
-[project.optional-dependencies]
-accelerated = [
-    "torch",
+    "huggingface-hub>=1.0.1",
+    "torch==2.8.0",
     "torchvision",
-    "xformers",
+    "xformers>=0.0.32.post2",
 ]
 
 [tool.setuptools.packages.find]
 include = ["dinov2*"]
-exclude = ["eval_configs*"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv.pip]
+# Use uv's auto detection when installing via `uv pip`
+torch-backend = "auto"

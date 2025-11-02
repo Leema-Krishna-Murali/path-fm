@@ -15,7 +15,7 @@ export NODE_RANK=$(( NODE_RANK + 1 ))
 
 # Training config (must match master node! double-check your run.sh script!)
 CONFIG_FILE="./dinov2/configs/train/vitg14_reg4.yaml"
-OUTPUT_DIR="./output_pretrained_on_test"
+OUTPUT_DIR="./output_vitg14"
 DATASET_PATH="s3://tcga-12tb-litdata/"
 
 # Set Python path for imports

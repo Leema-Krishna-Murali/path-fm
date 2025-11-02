@@ -41,7 +41,7 @@ trainer:
                 repo_or_dir: facebookresearch/dinov2 #facebookresearch/dino:main
                 model: dinov2_vitg14_reg #dinov2_vits14_reg #dino_vits16
                 pretrained: true
-              checkpoint_path: ./output_pretrained_giant/eval/training_175000/teacher_checkpoint.pth
+              checkpoint_path: /home/paul/training_250000/teacher_checkpoint.pth
 
           overwrite: true
     logger:

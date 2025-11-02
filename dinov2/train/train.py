@@ -32,6 +32,8 @@ torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False 
 logger = logging.getLogger("dinov2")
 import wandb
 
+CONFIG_FILE_PATH = None
+
 
 def _build_streaming_dataset(
     dataset_path: str,
@@ -40,8 +42,8 @@ def _build_streaming_dataset(
     shuffle_seed: int,
     world_size: int,
     global_rank: int,
-    fragment_prefetch_limit: int,
-    fragment_range_size: int,
+    fragment_prefetch_limit: int=1,
+    fragment_range_size: int=128 << 20,
 ):
     import pyarrow
     import pyarrow.dataset
@@ -184,12 +186,27 @@ def do_train(cfg, model, resume=False):
     
     from omegaconf import OmegaConf
     if distributed.is_main_process():
+        run_id_path = Path(cfg.train.output_dir) / "wandb_run_id.txt"
+        if resume and run_id_path.exists():
+            run_id = run_id_path.read_text().strip()
+            resume_mode = "must"
+        else:
+            run_id_path.parent.mkdir(parents=True, exist_ok=True)
+            run_id = wandb.util.generate_id()
+            run_id_path.write_text(run_id)
+            resume_mode = "allow"
         run = wandb.init(
-            project="midnight-rep",  # Specify your project
-            config = OmegaConf.to_container(cfg)
+            project="midnight-rep",
+            config=OmegaConf.to_container(cfg),
+            id=run_id,
+            resume=resume_mode,
         )
-
-
+        repo_root = Path(__file__).resolve().parents[2]
+        artifact = wandb.Artifact(name=f"run-source-{run.id}", type="code")
+        artifact.add_file(str(Path(__file__).resolve()))
+        artifact.add_file(str(repo_root / "run.sh"))
+        artifact.add_file(str(Path(CONFIG_FILE_PATH)))
+        run.log_artifact(artifact)
 
     # checkpointer
     checkpointer = FSDPCheckpointer(model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True)
@@ -307,13 +324,11 @@ def do_train(cfg, model, resume=False):
 
     dataset_builder = partial(
         _build_streaming_dataset,
-        dataset_path="medarc/TCGA-12K-parquet",
+        dataset_path="/data/TCGA_parquet_sample30", #"medarc/TCGA-12K-parquet",
         shuffle_buffer=10000,
         shuffle_seed=42,
         world_size=distributed.get_global_size(),
         global_rank=distributed.get_global_rank(),
-        fragment_prefetch_limit=1,
-        fragment_range_size=128 << 20,
     )
 
     def decode_and_transform(item):
@@ -603,4 +618,7 @@ def main(args):
 
 if __name__ == "__main__":
     args = get_args_parser(add_help=True).parse_args()
+    if not args.config_file:
+        raise ValueError("config file path must be provided")
+    CONFIG_FILE_PATH = os.path.abspath(args.config_file)
     main(args)
