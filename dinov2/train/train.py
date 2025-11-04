@@ -467,13 +467,14 @@ def do_train(cfg, model, resume=False):
         metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
         
         if distributed.is_main_process():
-            wandb.log({"Learning Rate":lr,
-                        "Momentum": mom,
-                        "Last Layer LR": last_layer_lr,
-                        "Learning Rate":lr,
-                        "Total Loss":losses_reduced
-                })
-            wandb.log(loss_dict)
+            scalar_logs = {
+                "Learning Rate": lr,
+                "Momentum": mom,
+                "Last Layer LR": last_layer_lr,
+                "Total Loss": losses_reduced,
+            }
+            loss_logs = {f"loss/{name}": value for name, value in loss_dict_reduced.items()}
+            wandb.log({**scalar_logs, **loss_logs}, step=iteration)
 
 
         

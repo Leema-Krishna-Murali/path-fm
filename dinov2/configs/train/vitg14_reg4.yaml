@@ -34,4 +34,4 @@ optim:
 crops:
   local_crops_size: 98
 evaluation:
-  eval_period_iterations: 25000 # save checkpoint every 20 epochs
+  eval_period_iterations: 12500 # save checkpoint every 10 epochs
