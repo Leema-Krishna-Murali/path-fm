@@ -24,8 +24,8 @@ student:
 teacher:
   momentum_teacher: 0.994
 optim:
-  epochs: 160  #8000 
-  early_stop: 161 # we want to early stop at 200 epochs to replicate SOTA ckpt
+  epochs: 8000 
+  early_stop: 200 # we want to early stop at 200 epochs to replicate SOTA ckpt
   weight_decay_end: 0.2
   base_lr: 2.0e-04  # learning rate for a batch size of 1024
   #Swapping from 3.5e-4 to 2.0e-4
