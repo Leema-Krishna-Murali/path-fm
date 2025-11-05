@@ -269,6 +269,9 @@ def do_train(cfg, model, resume=False):
         dataset_path="medarc/TCGA-12K-parquet",
         shuffle_buffer=10000,
         base_seed=42,
+        # Prefetch Arrow fragments to keep I/O busy
+        fragment_prefetch_limit=4,
+        fragment_range_size=(32 << 20),
     )
 
     def decode_and_transform(item):
@@ -280,40 +283,54 @@ def do_train(cfg, model, resume=False):
         return (transformed, None), slide_meta
 
     class _TransformedStreamingDataset(torch.utils.data.IterableDataset):
-        def __init__(self, dataset_builder, transform, samples_per_epoch=None):
+        def __init__(self, dataset_builder, transform, samples_per_epoch=None, reshuffle_every=0):
             self._dataset_builder = dataset_builder
             self._transform = transform
-            # Total samples this rank should yield per epoch (across all workers)
             self._samples_per_epoch = samples_per_epoch
-            self._epoch = 0  # vary shuffle each cycle
+            self._reshuffle_every = reshuffle_every  # 0 => never
+            self._initialized = False
+            self._epoch_seen = 0
+            self._src_iter = None
+
+        def _init_or_reshuffle(self, *, force: bool = False):
+            if force or (not self._initialized) or (
+                self._reshuffle_every and (self._epoch_seen % self._reshuffle_every == 0)
+            ):
+                src = self._dataset_builder(epoch=self._epoch_seen if self._reshuffle_every else 0)
+                worker_info = torch.utils.data.get_worker_info()
+                if worker_info is not None and worker_info.num_workers > 1:
+                    src = src.shard(num_shards=worker_info.num_workers, index=worker_info.id)
+                self._src_iter = iter(src)
+                self._initialized = True
 
         def __iter__(self):
-            # Repeat forever so the training loop can control total iterations
-            # via schedules (epochs * OFFICIAL_EPOCH_LENGTH).
             while True:
-                # Build the HF streaming dataset inside the worker process to keep file handles valid.
-                source = self._dataset_builder(epoch=self._epoch)
-                self._epoch += 1
+                self._init_or_reshuffle()
+
+                # Per-RANK quota
+                rank_quota = self._samples_per_epoch or (1 << 62)
 
                 worker_info = torch.utils.data.get_worker_info()
-                num_workers = 1
-                worker_id = 0
-                if worker_info is not None and worker_info.num_workers > 1:
-                    num_workers = worker_info.num_workers
-                    worker_id = worker_info.id
-                    source = source.shard(num_shards=num_workers, index=worker_id)
+                num_workers = worker_info.num_workers if worker_info is not None else 1
+                worker_id = worker_info.id if worker_info is not None else 0
 
-                # Optionally bound samples to keep steps identical across ranks.
-                it = source
-                if self._samples_per_epoch is not None:
-                    # Distribute per-rank quota across workers as evenly as possible.
-                    base = self._samples_per_epoch // num_workers
-                    remainder = self._samples_per_epoch % num_workers
-                    local_quota = base + (1 if worker_id < remainder else 0)
-                    it = itertools.islice(it, max(0, local_quota))
+                # Split quota across workers (nearly even split)
+                base = rank_quota // num_workers
+                remainder = rank_quota % num_workers
+                local_quota = base + (1 if worker_id < remainder else 0)
 
-                for sample in it:
+                produced = 0
+                while produced < local_quota:
+                    try:
+                        sample = next(self._src_iter)
+                    except StopIteration:
+                        # Refill the iterator; only reshuffle on epoch boundaries
+                        self._init_or_reshuffle(force=True)
+                        continue
                     yield self._transform(sample)
+                    produced += 1
+
+                self._epoch_seen += 1
 
     # Define explicit per-epoch sample budget per rank to keep ranks in lock-step
     samples_per_epoch = cfg.train.batch_size_per_gpu * cfg.train.OFFICIAL_EPOCH_LENGTH
@@ -321,8 +338,14 @@ def do_train(cfg, model, resume=False):
         dataset_builder,
         decode_and_transform,
         samples_per_epoch=samples_per_epoch,
+        reshuffle_every=0,
     )
 
+    def _worker_init(_):
+        torch.set_num_threads(1)
+        os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+    prefetch_factor = 4 if cfg.train.num_workers > 0 else None
     data_loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=cfg.train.batch_size_per_gpu,
@@ -331,6 +354,8 @@ def do_train(cfg, model, resume=False):
         pin_memory=True,
         persistent_workers=True,
         collate_fn=collate_fn,
+        prefetch_factor=prefetch_factor,
+        worker_init_fn=_worker_init,
     )
 
     # training loop
