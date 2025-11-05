@@ -7,16 +7,13 @@ export MASTER_PORT=29500
 
 export NNODES=2
 export NPROC_PER_NODE=8
-
-# Determine which worker node this is 
-# add 1 to whatever Lightning's assigned NODE RANK is since
-# we are using the Studio node as NODE RANK 0
-export NODE_RANK=$(( NODE_RANK + 1 ))
+export CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7" # specific devices to use on this node
+export NODE_RANK=$(( NODE_RANK + 1 )) # non-master node rank (1 for first worker, etc.)
 
 # Training config (must match master node! double-check your run.sh script!)
 CONFIG_FILE="./dinov2/configs/train/vitg14_reg4.yaml"
 OUTPUT_DIR="./output_vitg14"
-DATASET_PATH="s3://tcga-12tb-litdata/"
+RESUME="True" # set string to "True" to resume from last checkpoint in OUTPUT_DIR, if starting a new run from scratch keep it set to "False"
 
 # Set Python path for imports
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -28,14 +25,16 @@ echo "MASTER_PORT=${MASTER_PORT}"
 echo "NNODES=${NNODES}, NPROC_PER_NODE=${NPROC_PER_NODE}"
 echo "CONFIG_FILE=${CONFIG_FILE}"
 echo "OUTPUT_DIR=${OUTPUT_DIR}"
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
 
 uv run torchrun \
-  --nnodes ${NNODES} \
-  --nproc_per_node ${NPROC_PER_NODE} \
-  --node_rank ${NODE_RANK} \
-  --master_addr ${MASTER_ADDR} \
-  --master_port ${MASTER_PORT} \
+  --nnodes "${NNODES}" \
+  --nproc_per_node "${NPROC_PER_NODE}" \
+  --node_rank "${NODE_RANK}" \
+  --master_addr "${MASTER_ADDR}" \
+  --master_port "${MASTER_PORT}" \
+  --max-restarts "${MAX_RESTARTS}" \
   dinov2/train/train.py \
-    --config-file "${CONFIG_FILE}" \
-    --output-dir "${OUTPUT_DIR}" \
-    train.dataset_path="${DATASET_PATH}"
+  --config-file "${CONFIG_FILE}" \
+  --output-dir "${OUTPUT_DIR}" \
+  ${RESUME_FLAG} 

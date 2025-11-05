@@ -1,20 +1,30 @@
-# Pathology DinoV2
+# Path-FM-0
+
+Fully open-sourced Midnight replication that trains faster and shows improved average benchmark performance.
 
 **[SophontAI](https://sophontai.com/)**
+**[MedARC](https://medarc.ai)**
+
+[![Collaborate with us on Discord](https://img.shields.io/badge/Discord-Collaborate%20with%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/tVR4TWnRM9)
 
 In this repository, following a plethora of works before us, we apply DINO(V2) to the pathology space.
 If you are interested in helping out, check the open Issues.
 
 ## Installation
 
-Clone the repository, cd into it, then run the provided installation script. 
+Clone the repository 
+
 ```shell
-pip install uv
-uv sync
-source .venv/bin/activate
-cp _utils.py .venv/lib/python3.10/site-packages/eva/core/models/wrappers/
+git clone https://github.com/MedARC-AI/path-fm.git
 ```
-This will create a virtual environment with all necessary packages pre-installed called "pathologydino", located as a .venv folder in the same directory as path-fm.
+
+cd into it, then run our installation script
+
+```shell
+./install.sh
+```
+
+This will create a virtual environment with all necessary packages pre-installed called "pathologydino", located as a .venv folder in the same directory as path-fm. It will automatically detect your machine's CUDA version and install the appropriate wheels.
 
 ## Training
 

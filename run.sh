@@ -8,29 +8,29 @@ export MASTER_PORT=29500
 export NNODES=1 # number of nodes you are using
 export NPROC_PER_NODE=8 # number of GPUs per node
 export CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7" # specific devices to use on this node
-
 export NODE_RANK=0 # the node running this script will be master node (rank 0)
 
-# Repository root and training config
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# Training config
 CONFIG_FILE="./dinov2/configs/train/vitg14_reg4.yaml"
 OUTPUT_DIR="./output_vitg14"
-DATASET_PATH="s3://tcga-12tb-litdata/"
-RESUME="False" # set string to "True" to resume from last checkpoint in OUTPUT_DIR
+RESUME="True" # set string to "True" to resume from last checkpoint in OUTPUT_DIR, if starting a new run from scratch keep it set to "False"
+
+# Set Python path for imports
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 # Clean output directory only when not resuming
 if [[ "${RESUME}" == "True" ]]; then
   echo "Resume enabled; preserving ${OUTPUT_DIR}"
   RESUME_FLAG=""
+  MAX_RESTARTS=10
 else
   echo "Resume disabled; cleaning ${OUTPUT_DIR}"
   rm -rf "${OUTPUT_DIR}"
   RESUME_FLAG="--no-resume"
+  mkdir -p "${OUTPUT_DIR}"
+  MAX_RESTARTS=0
 fi
-mkdir -p "${OUTPUT_DIR}"
-
-# Set Python path for imports
-export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 echo "[Master Node] Starting training..."
 echo "MASTER_ADDR=${MASTER_ADDR}"
@@ -46,8 +46,8 @@ uv run torchrun \
   --node_rank "${NODE_RANK}" \
   --master_addr "${MASTER_ADDR}" \
   --master_port "${MASTER_PORT}" \
+  --max-restarts "${MAX_RESTARTS}" \
   dinov2/train/train.py \
   --config-file "${CONFIG_FILE}" \
   --output-dir "${OUTPUT_DIR}" \
-  ${RESUME_FLAG} \
-  train.dataset_path="${DATASET_PATH}"
+  ${RESUME_FLAG} 

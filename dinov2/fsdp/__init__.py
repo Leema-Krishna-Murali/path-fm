@@ -82,6 +82,9 @@ def rankstr():
 
 
 class FSDPCheckpointer(Checkpointer):
+    def _load_file(self, f: str):
+        return torch.load(f, map_location=torch.device("cpu"), weights_only=False)
+
     def save(self, name: str, **kwargs: Any) -> None:
         """
         Dump model and checkpointables to a file.

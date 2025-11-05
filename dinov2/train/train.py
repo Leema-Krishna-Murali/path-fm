@@ -9,6 +9,7 @@ import math
 import os
 import random
 from functools import partial
+import itertools
 from io import BytesIO
 from pathlib import Path
 
@@ -39,14 +40,18 @@ def _build_streaming_dataset(
     dataset_path: str,
     *,
     shuffle_buffer: int,
-    shuffle_seed: int,
-    world_size: int,
-    global_rank: int,
-    fragment_prefetch_limit: int=1,
-    fragment_range_size: int=128 << 20,
+    base_seed: int,
+    fragment_prefetch_limit: int = 1,
+    fragment_range_size: int = 128 << 20,
+    epoch: int = 0,
 ):
     import pyarrow
     import pyarrow.dataset
+    import torch.distributed as dist
+
+    # Get current rank/size at call time (safe under elastic restarts)
+    world_size = dist.get_world_size() if dist.is_available() and dist.is_initialized() else 1
+    global_rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
 
     fragment_scan_options = pyarrow.dataset.ParquetFragmentScanOptions(
         cache_options=pyarrow.CacheOptions(
@@ -54,15 +59,21 @@ def _build_streaming_dataset(
             range_size_limit=fragment_range_size,
         ),
     )
-    dataset = load_dataset(
+
+    ds = load_dataset(
         dataset_path,
         streaming=True,
         fragment_scan_options=fragment_scan_options,
     )["train"]
-    dataset = dataset.shuffle(buffer_size=shuffle_buffer, seed=shuffle_seed)
+
+    # 1) shard first to avoid cross-rank duplication and wasted I/O
     if world_size > 1:
-        dataset = dataset.shard(num_shards=world_size, index=global_rank)
-    return dataset
+        ds = ds.shard(num_shards=world_size, index=global_rank)
+
+    # 2) then shuffle; vary by epoch and rank
+    seed = base_seed + epoch * 1_000_000 + global_rank * 10000
+    ds = ds.shuffle(buffer_size=shuffle_buffer, seed=seed)
+    return ds
 
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("DINOv2 training", add_help=add_help)
@@ -156,14 +167,13 @@ def apply_optim_scheduler(optimizer, lr, wd, last_layer_lr):
         param_group["lr"] = (last_layer_lr if is_last_layer else lr) * lr_multiplier
 
 
-def do_test(cfg, model, iteration):
+def do_test(cfg, model, iteration): # save teacher checkpoint
     new_state_dict = model.teacher.state_dict()
 
     if distributed.is_main_process():
         iterstring = str(iteration)
         eval_dir = os.path.join(cfg.train.output_dir, "eval", iterstring)
         os.makedirs(eval_dir, exist_ok=True)
-        # save teacher checkpoint
         teacher_ckp_path = os.path.join(eval_dir, "teacher_checkpoint.pth")
         torch.save({"teacher": new_state_dict}, teacher_ckp_path)
 
@@ -211,24 +221,7 @@ def do_train(cfg, model, resume=False):
     # checkpointer
     checkpointer = FSDPCheckpointer(model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True)
 
-    #This is where we resume. This error is veyr strange thuogh...
     start_iter = checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
-    """W20250825 03:00:27 4071999 fvcore.common.checkpoint checkpoint.py:352] The checkpoint state_dict contains keys that are not used by the model:
-  student.backbone._flat_param
-  student.backbone.blocks.0._flat_param
-  student.backbone.blocks.1._flat_param
-  student.backbone.blocks.2._flat_param
-  student.backbone.blocks.3._flat_param
-  student.dino_head._flat_param
-  student.ibot_head._flat_param
-  teacher.backbone._flat_param
-  teacher.backbone.blocks.0._flat_param
-  teacher.backbone.blocks.1._flat_param
-  teacher.backbone.blocks.2._flat_param
-  teacher.backbone.blocks.3._flat_param
-  teacher.dino_head._flat_param
-  teacher.ibot_head._flat_param
-    """
 
     OFFICIAL_EPOCH_LENGTH = cfg.train.OFFICIAL_EPOCH_LENGTH
     max_iter = cfg.optim.epochs * OFFICIAL_EPOCH_LENGTH
@@ -269,66 +262,13 @@ def do_train(cfg, model, resume=False):
         dtype=inputs_dtype,
     )
 
-    # setup data loader
-
-    # print("dataset path is", cfg.train.dataset_path)#This is the imagenet string shit
-    # dataset = make_dataset(
-    #     dataset_str=cfg.train.dataset_path,
-    #     transform=data_transform,
-    #     target_transform=lambda _: (),
-    # )
-    # # sampler_type = SamplerType.INFINITE
-    # sampler_type = SamplerType.SHARDED_INFINITE
-    # data_loader = make_data_loader(
-    #     dataset=dataset,
-    #     batch_size=cfg.train.batch_size_per_gpu,
-    #     num_workers=cfg.train.num_workers,
-    #     #num_workers = 1,
-    #     shuffle=True,
-    #     seed=0,
-    #     sampler_type=sampler_type,
-    #     sampler_advance=0,  # TODO(qas): fix this -- start_iter * cfg.train.batch_size_per_gpu,
-    #     drop_last=True,
-    #     collate_fn=collate_fn,
-    # )
-
-    # import litdata as ld
-    
-    # dataset_root = "/data/TCGA_lit_sample30"
-    
-    # def decode_and_transform(item):
-    #     image_file = BytesIO(item["image_bytes"])
-    #     image = Image.open(image_file)
-    #     image = image.convert("RGB")
-    #     transformed = data_transform(image)
-    #     slide_meta = (item["slide_path"], item["x"], item["y"], item["level"])
-    #     return (transformed, None), slide_meta
-    
-    # dataset = ld.StreamingDataset(
-    #     input_dir=dataset_root,
-    #     shuffle=True,
-    #     drop_last=True,
-    #     seed=0,
-    #     transform=decode_and_transform,
-    #     max_cache_size="1000GB",
-    # )
-    
-    # data_loader = ld.StreamingDataLoader(
-    #     dataset,
-    #     batch_size=cfg.train.batch_size_per_gpu,
-    #     num_workers=cfg.train.num_workers,
-    #     drop_last=True,
-    #     pin_memory=True,
-    #     collate_fn=collate_fn,
-    # )
+    # setup data loader (streaming from huggingface)
 
     dataset_builder = partial(
         _build_streaming_dataset,
-        dataset_path="/data/TCGA_parquet_sample30", #"medarc/TCGA-12K-parquet",
+        dataset_path="medarc/TCGA-12K-parquet",
         shuffle_buffer=10000,
-        shuffle_seed=42,
-        world_size=distributed.get_global_size(),
-        global_rank=distributed.get_global_rank(),
+        base_seed=42,
     )
 
     def decode_and_transform(item):
@@ -340,20 +280,48 @@ def do_train(cfg, model, resume=False):
         return (transformed, None), slide_meta
 
     class _TransformedStreamingDataset(torch.utils.data.IterableDataset):
-        def __init__(self, dataset_builder, transform):
+        def __init__(self, dataset_builder, transform, samples_per_epoch=None):
             self._dataset_builder = dataset_builder
             self._transform = transform
+            # Total samples this rank should yield per epoch (across all workers)
+            self._samples_per_epoch = samples_per_epoch
+            self._epoch = 0  # vary shuffle each cycle
 
         def __iter__(self):
-            # Build the HF streaming dataset inside the worker process to keep file handles valid.
-            source = self._dataset_builder()
-            worker_info = torch.utils.data.get_worker_info()
-            if worker_info is not None and worker_info.num_workers > 1:
-                source = source.shard(num_shards=worker_info.num_workers, index=worker_info.id)
-            for sample in source:
-                yield self._transform(sample)
+            # Repeat forever so the training loop can control total iterations
+            # via schedules (epochs * OFFICIAL_EPOCH_LENGTH).
+            while True:
+                # Build the HF streaming dataset inside the worker process to keep file handles valid.
+                source = self._dataset_builder(epoch=self._epoch)
+                self._epoch += 1
 
-    dataset = _TransformedStreamingDataset(dataset_builder, decode_and_transform)
+                worker_info = torch.utils.data.get_worker_info()
+                num_workers = 1
+                worker_id = 0
+                if worker_info is not None and worker_info.num_workers > 1:
+                    num_workers = worker_info.num_workers
+                    worker_id = worker_info.id
+                    source = source.shard(num_shards=num_workers, index=worker_id)
+
+                # Optionally bound samples to keep steps identical across ranks.
+                it = source
+                if self._samples_per_epoch is not None:
+                    # Distribute per-rank quota across workers as evenly as possible.
+                    base = self._samples_per_epoch // num_workers
+                    remainder = self._samples_per_epoch % num_workers
+                    local_quota = base + (1 if worker_id < remainder else 0)
+                    it = itertools.islice(it, max(0, local_quota))
+
+                for sample in it:
+                    yield self._transform(sample)
+
+    # Define explicit per-epoch sample budget per rank to keep ranks in lock-step
+    samples_per_epoch = cfg.train.batch_size_per_gpu * cfg.train.OFFICIAL_EPOCH_LENGTH
+    dataset = _TransformedStreamingDataset(
+        dataset_builder,
+        decode_and_transform,
+        samples_per_epoch=samples_per_epoch,
+    )
 
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -361,6 +329,7 @@ def do_train(cfg, model, resume=False):
         num_workers=cfg.train.num_workers,
         drop_last=True,
         pin_memory=True,
+        persistent_workers=True,
         collate_fn=collate_fn,
     )
 
@@ -373,7 +342,6 @@ def do_train(cfg, model, resume=False):
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
 
-    import time
     for data in metric_logger.log_every(
         data_loader,
         10,
@@ -388,16 +356,10 @@ def do_train(cfg, model, resume=False):
                 torch.cuda.synchronize()
             checkpointer.save(f"model_{iteration:07d}", iteration=iteration)
             break
-        start = time.time() 
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
-        start_event.record()
-
         
         current_batch_size = data["collated_global_crops"].shape[0] / 2
         if iteration > max_iter:
             return
-        
         
         nan_mask = torch.isnan(data["collated_global_crops"])
         nan_mask2 = torch.isnan(data["collated_local_crops"])
@@ -473,20 +435,10 @@ def do_train(cfg, model, resume=False):
                 "Last Layer LR": last_layer_lr,
                 "Total Loss": losses_reduced,
             }
-            loss_logs = {f"loss/{name}": value for name, value in loss_dict_reduced.items()}
-            wandb.log({**scalar_logs, **loss_logs}, step=iteration)
-
-
-        
-        # checkpointing and testing
-        
-        end_event.record()
+            wandb.log({**scalar_logs, **loss_dict_reduced}, step=iteration)
     
         # Synchronize the GPU to ensure all operations are complete before measuring
         torch.cuda.synchronize()
-        # Calculate and print the elapsed time
-        elapsed_ms = start_event.elapsed_time(end_event)
-        # print(f"Time elapsed for matmul: {elapsed_ms:.2f} ms")
         
         #Save instantly
         if cfg.evaluation.eval_period_iterations >= 0 and (iteration) % cfg.evaluation.eval_period_iterations == 0:
@@ -495,8 +447,6 @@ def do_train(cfg, model, resume=False):
         periodic_checkpointer.step(iteration)
 
         iteration = iteration + 1
-        end = time.time()
-        # print(end - start)
     metric_logger.synchronize_between_processes()
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
@@ -509,10 +459,10 @@ def main(args):
     if cfg.train.use_pretrained:
 
         if cfg.student.arch == "vit_giant2":
-            print("loading pretraind DinoV2-giant") 
+            print("loading pretrained DinoV2-giant") 
             model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitg14_reg')
         else:
-            AssertionError("only giant pretrained supported currently")
+            AssertionError("only giant pretrained is supported currently")
 
         model_pretrained = model_pretrained.to(torch.device("cuda"))
         model.student.backbone.patch_embed.proj.weight = model_pretrained.patch_embed.proj.weight
@@ -526,15 +476,14 @@ def main(args):
         print(model_pretrained.pos_embed.shape) #1, 1360, 384. We lose pos embed because it was 518
         print(model.student.backbone.pos_embed.shape) #1, 257, 384
 
-        #Interpolate pos embed
-        if True: # small only
-            source = model_pretrained.pos_embed.transpose(1, 2)
-            size = model.student.backbone.pos_embed.shape[1]
-            interpolated = torch.nn.functional.interpolate(source, size=size, mode='linear', align_corners=False)
-            interpolated_embeddings = interpolated.transpose(1, 2)
-            model.student.pos_embed = interpolated_embeddings
-        else:
-            model.student.pos_embed = model_pretrained.pos_embed
+        # Interpolate pos embed (only has an effect if you are training smaller model size than vitG)
+        # note: the below seems to be doing 1d interpolation, but you need 2d interp
+        # https://github.com/huggingface/pytorch-image-models/blob/47c18f4b6419d34ada6e5deba2463727f3b219f2/timm/layers/pos_embed.py#L47-L49
+        source = model_pretrained.pos_embed.transpose(1, 2)
+        size = model.student.backbone.pos_embed.shape[1]
+        interpolated = torch.nn.functional.interpolate(source, size=size, mode='linear', align_corners=False)
+        interpolated_embeddings = interpolated.transpose(1, 2)
+        model.student.pos_embed = interpolated_embeddings
 
         # We need to make sure we grab *all* of the keys.
         # For each block, copy weights over.
@@ -545,64 +494,33 @@ def main(args):
         for layer in model.student.backbone.blocks:
             for sublayer in layer:
                 if type(sublayer) != torch.nn.Identity:
-                    #So we have the subblock, now we need to convert
                     current = layers.pop(0)
                     sublayer.norm1.weight = current.norm1.weight
                     sublayer.norm1.bias = current.norm1.bias
-                    
                     sublayer.attn.qkv.weight = current.attn.qkv.weight
-                    #
                     sublayer.attn.qkv.bias =  current.attn.qkv.bias
-
                     sublayer.attn.proj.weight = current.attn.proj.weight
-                    
-                    #
                     sublayer.attn.proj.bias = current.attn.proj.bias
-
-
                     sublayer.norm2.weight = current.norm2.weight
-                    
-                    #
                     sublayer.norm2.bias = current.norm2.bias
                     try:
                         sublayer.mlp.fc1.weight = current.mlp.fc1.weight
                         sublayer.mlp.fc2.weight = current.mlp.fc2.weight
                         sublayer.mlp.fc1.bias = current.mlp.fc1.bias
                         sublayer.mlp.fc2.bias = current.mlp.fc2.bias
-                    except:#Not very clean, needs improvement
+                    except:
                         sublayer.mlp.w12.weight = current.mlp.w12.weight
                         sublayer.mlp.w12.bias = current.mlp.w12.bias
-
                         sublayer.mlp.w3.weight = current.mlp.w3.weight
                         sublayer.mlp.w3.bias = current.mlp.w3.bias
-                        
-
-
                     sublayer.ls1.gamma = current.ls1.gamma
                     sublayer.ls2.gamma = current.ls2.gamma
 
 
         model.student.backbone.norm.weight = model_pretrained.norm.weight
-        
-        #
         model.student.backbone.norm.bias = model_pretrained.norm.bias 
 
-        #The temp sucess was norm bias off.
-
-    #freeze everything *Except* position embeddings and new params
     model.prepare_for_distributed_training()
-    if False:#Test partial freeze
-        for param in model.student.parameters():
-            param.requires_grad = False
-        for param in model.student.ibot_head.parameters():
-            param.requires_grad = True
-        for param in model.student.dino_head.parameters():
-            param.requires_grad = True
-
-
-        if False:#For giant, we don't need to tune this
-            model.student.backbone.pos_embed.requires_grad = True
-
     logger.info("Model:\n{}".format(model))
 
     if args.eval_only:
