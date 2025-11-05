@@ -26,14 +26,16 @@ cd into it, then run our installation script
 
 This will create a virtual environment with all necessary packages pre-installed called "pathologydino", located as a .venv folder in the same directory as path-fm. It will automatically detect your machine's CUDA version and install the appropriate wheels.
 
-## Training
-
-We provide a script, run.sh.
-This will activate the venv created above, and run training on a single node. 
-If you modified the venv directory, you will need to make that change in run.sh also.
+## Training Single-GPU (Short Config)
 
 ```shell
-bash run.sh
+./run_short_1gpu.sh
+```
+
+## Training Single-Node (Full Reproduction)
+
+```shell
+./run_1node.sh
 ```
 
 By default, we make only 4 GPUs visible, and run on those 4. If you want to change the indexes, modify the numbers after "CUDA_VISIBLE_DEVICES=0,1,2,3".
@@ -44,6 +46,11 @@ By default, we use a vits, with 4 registers. This is reflected in the config.
 
 Output will be saved into the directory specificed by "--output_dir". Ensure that this directory does not contain any old files from training runs, or the code will attempt to resume instead.
 
+## Training Multi-Node (Full Reproduction)
+
+```shell
+./run.sh
+```
 
 ## Evaluation
 
@@ -54,3 +61,14 @@ eva predict fit --config dinov2/eval_config.yaml
 ```
 Please modify the checkpoint_path to match the checkpoint you wish to test.
 Trained checkpoints will be found in output_dir/eval/training_X.
+
+
+## Related Work / Citation
+
+This repository adapts and extends Meta AI's DINOv2 codebase and follows modifications introduced by Kaiko's Midnight work. If you use this repository or models in academic work, please cite their and our work:
+
+Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., ... & Bojanowski, P. (2023). Dinov2: Learning robust visual features without supervision. arXiv preprint arXiv:2304.07193.
+
+Karasikov, M., van Doorn, J., Känzig, N., Erdal Cesur, M., Horlings, H. M., Berke, R., ... & Otálora, S. (2025). Training state-of-the-art pathology foundation models with orders of magnitude less data. In International Conference on Medical Image Computing and Computer-Assisted Intervention (pp. 573-583). Cham: Springer Nature Switzerland.
+
+Kaplan, D., Grandhi, R. S., Lane, C., Warner, B., Abraham, T. M., & Scotti, P. S. (in-progress). How to Train a State-of-the-Art Pathology Foundation Model with $1.6k.

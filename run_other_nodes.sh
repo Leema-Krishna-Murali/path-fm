@@ -33,7 +33,6 @@ uv run torchrun \
   --node_rank "${NODE_RANK}" \
   --master_addr "${MASTER_ADDR}" \
   --master_port "${MASTER_PORT}" \
-  --max-restarts "${MAX_RESTARTS}" \
   dinov2/train/train.py \
   --config-file "${CONFIG_FILE}" \
   --output-dir "${OUTPUT_DIR}" \

@@ -23,13 +23,11 @@ export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 if [[ "${RESUME}" == "True" ]]; then
   echo "Resume enabled; preserving ${OUTPUT_DIR}"
   RESUME_FLAG=""
-  MAX_RESTARTS=10
 else
   echo "Resume disabled; cleaning ${OUTPUT_DIR}"
   rm -rf "${OUTPUT_DIR}"
   RESUME_FLAG="--no-resume"
   mkdir -p "${OUTPUT_DIR}"
-  MAX_RESTARTS=0
 fi
 
 echo "[Master Node] Starting training..."
@@ -46,7 +44,6 @@ uv run torchrun \
   --node_rank "${NODE_RANK}" \
   --master_addr "${MASTER_ADDR}" \
   --master_port "${MASTER_PORT}" \
-  --max-restarts "${MAX_RESTARTS}" \
   dinov2/train/train.py \
   --config-file "${CONFIG_FILE}" \
   --output-dir "${OUTPUT_DIR}" \
