@@ -32,13 +32,9 @@ import pyarrow
 import pyarrow.dataset
 import torch.distributed as dist
 
-
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
 logger = logging.getLogger("dinov2")
 import wandb
-
-CONFIG_FILE_PATH = None
-
 
 def _build_streaming_dataset(
     dataset_path: str,
@@ -214,7 +210,8 @@ def do_train(cfg, model, resume=False):
         repo_root = Path(__file__).resolve().parents[2]
         artifact = wandb.Artifact(name=f"run-source-{run.id}", type="code")
         artifact.add_file(str(Path(__file__).resolve()))
-        artifact.add_file(str(repo_root / "run.sh"))
+
+        artifact.add_file(str(os.environ.get("DINOV2_RUN_SCRIPT")))
         artifact.add_file(str(Path(CONFIG_FILE_PATH)))
         run.log_artifact(artifact)
 
