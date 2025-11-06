@@ -163,7 +163,7 @@ Now uncomment out specific lines in the HEST YAML config to enable PCA dimension
 sed -i -E '/^datasets:/,/^\]/{s/^([[:space:]]*)#([[:space:]]*)"([^"]+)",/\1"\3",/}; s/^[[:space:]]*#([[:space:]]*dimreduce:[[:space:]]*".*")/\1/; /^encoders:/,/^\]/{s/^([[:space:]]*)"resnet50"(,?)/\1# "resnet50"\2/}' ./HEST/bench_config/bench_config.yaml
 ```
 
-Then finally run our HEST_evaluation.py script to benchmark your checkpoint. Running HEST_evaluation.py will automatically download the necessary preprocessed patches and patch encoders and output results into a new `path-fm/eval` folder (specifically the `bench_data/` subfolder).
+Then finally run our HEST_evaluation.py script to benchmark your checkpoint. Running HEST_evaluation.py will automatically download the necessary preprocessed patches and patch encoders and output results into a new `path-fm/eval` folder (specifically, the benchmark results dump to the `ST_pred_results/` subfolder).
 
 ```bash
 python HEST_evaluation.py
