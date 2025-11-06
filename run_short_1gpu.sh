@@ -7,7 +7,7 @@ export MASTER_PORT=29500
 
 export NNODES=1 # number of nodes you are using
 export NPROC_PER_NODE=1 # number of GPUs per node
-export CUDA_VISIBLE_DEVICES="1" # specific devices to use on this node
+export CUDA_VISIBLE_DEVICES="0" # specific devices to use on this node
 export NODE_RANK=0 # the node running this script will be master node (rank 0)
 
 # Training config
