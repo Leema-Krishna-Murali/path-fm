@@ -3,11 +3,12 @@ trainer:
   class_path: eva.Trainer
   init_args:
     n_runs: &N_RUNS ${oc.env:N_RUNS, 50}
-    default_root_dir: &OUTPUT_ROOT ${oc.env:OUTPUT_ROOT, logs/${oc.env:MODEL_NAME, dino_vits16}/offline/patch_camelyon}
+    default_root_dir: &OUTPUT_ROOT ${oc.env:OUTPUT_ROOT, logs/${oc.env:MODEL_NAME, vitg14_reg}/offline/patch_camelyon}
     max_steps: &MAX_STEPS ${oc.env:MAX_STEPS, 12500}
     num_sanity_val_steps: 0
     check_val_every_n_epoch: 10
     checkpoint_type: ${oc.env:CHECKPOINT_TYPE, best}
+    devices: ${oc.env:NUM_DEVICES, 1}
     callbacks:
       - class_path: eva.callbacks.ConfigurationLogger
       - class_path: lightning.pytorch.callbacks.TQDMProgressBar
@@ -31,7 +32,7 @@ trainer:
           mode: *MONITOR_METRIC_MODE
       - class_path: eva.callbacks.ClassificationEmbeddingsWriter
         init_args:
-          output_dir: &DATASET_EMBEDDINGS_ROOT ${oc.env:EMBEDDINGS_ROOT, ./data/embeddings}/${oc.env:MODEL_NAME, dino_vits16}/patch_camelyon
+          output_dir: &DATASET_EMBEDDINGS_ROOT ${oc.env:EMBEDDINGS_ROOT, ./data/embeddings}/${oc.env:MODEL_NAME, vitg14_reg}/patch_camelyon
           dataloader_idx_map:
             0: train
             1: val
@@ -136,3 +137,4 @@ data:
         class_path: eva.core.data.samplers.classification.BalancedSampler
         init_args:
           num_samples: 10
+          reset_generator: false  # Set to false to sample new indices every evaluation run
