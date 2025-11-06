@@ -43,10 +43,10 @@ trainer:
             init_args:
               path: torch.hub.load
               arguments:
-                repo_or_dir: facebookresearch/dinov2 #facebookresearch/dino:main
-                model: dinov2_vitg14_reg #dinov2_vits14_reg #dino_vits16
+                repo_or_dir: facebookresearch/dinov2 
+                model: dinov2_vitg14_reg 
                 pretrained: true
-              checkpoint_path: ./output_pretrained_giant/eval/training_175000/teacher_checkpoint.pth
+              checkpoint_path: ../checkpoints/teacher_epoch250000.pth
 
 
           overwrite: true

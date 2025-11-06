@@ -38,5 +38,7 @@ output*
 sample_dataset_30.txt
 uv.lock 
 watch_run.sh
-training_250000/
 wandb/
+HEST/
+eva-probe/
+eval/

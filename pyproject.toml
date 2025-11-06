@@ -23,6 +23,12 @@ dependencies = [
     "torch==2.8.0",
     "torchvision",
     "xformers>=0.0.32.post2",
+    # for Eva benchmarking:
+    "imagesize>=1.4.1",
+    "scipy>=1.14.0",
+    "monai>=1.3.2",
+    # for HEST benchmarking:
+    "hestcore==1.0.4",
 ]
 
 [tool.setuptools.packages.find]

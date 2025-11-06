@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Worker node configuration
-export MASTER_ADDR="10.128.0.10"  # <-- Replace this with master node IP
+# Master node configuration 
+export MASTER_ADDR=$(hostname -I | awk '{print $1}')
 export MASTER_PORT=29500
 
-export NNODES=2
-export NPROC_PER_NODE=8
+export NNODES=2 # number of nodes you are using
+export NPROC_PER_NODE=8 # number of GPUs per node
 export CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7" # specific devices to use on this node
-export NODE_RANK=$(( NODE_RANK + 1 )) # non-master node rank (1 for first worker, etc.)
+export NODE_RANK=0 # the node running this script will be master node (rank 0)
 
-# Training config (must match master node! double-check your run.sh script!)
+# Training config
 CONFIG_FILE="./dinov2/configs/train/vitg14_reg4.yaml"
 OUTPUT_DIR="./output_vitg14"
 RESUME="True" # set string to "True" to resume from last checkpoint in OUTPUT_DIR if it exists
@@ -21,12 +21,16 @@ export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 # Clean output directory only when not resuming
 if [[ "${RESUME}" == "True" ]]; then
+  echo "Resume enabled; preserving ${OUTPUT_DIR}"
   RESUME_FLAG=""
 else
+  echo "Resume disabled; cleaning ${OUTPUT_DIR}"
+  rm -rf "${OUTPUT_DIR}"
   RESUME_FLAG="--no-resume"
 fi
+mkdir -p "${OUTPUT_DIR}"
 
-echo "[Worker Node ${NODE_RANK}] Joining training..."
+echo "[Master Node] Starting training..."
 echo "MASTER_ADDR=${MASTER_ADDR}"
 echo "MASTER_PORT=${MASTER_PORT}"
 echo "NNODES=${NNODES}, NPROC_PER_NODE=${NPROC_PER_NODE}"

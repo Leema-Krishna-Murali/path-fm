@@ -13,7 +13,7 @@ export NODE_RANK=0 # the node running this script will be master node (rank 0)
 # Training config
 CONFIG_FILE="./dinov2/configs/train/vitg14_reg4.yaml"
 OUTPUT_DIR="./output_vitg14"
-RESUME="True" # set string to "True" to resume from last checkpoint in OUTPUT_DIR, if starting a new run from scratch keep it set to "False"
+RESUME="True" # set string to "True" to resume from last checkpoint in OUTPUT_DIR if it exists
 
 # Set Python path for imports
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -27,8 +27,8 @@ else
   echo "Resume disabled; cleaning ${OUTPUT_DIR}"
   rm -rf "${OUTPUT_DIR}"
   RESUME_FLAG="--no-resume"
-  mkdir -p "${OUTPUT_DIR}"
 fi
+mkdir -p "${OUTPUT_DIR}"
 
 echo "[Master Node] Starting training..."
 echo "MASTER_ADDR=${MASTER_ADDR}"

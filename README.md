@@ -1,67 +1,173 @@
 # Path-FM-0
 
-Fully open-sourced Midnight replication that trains faster and shows improved average benchmark performance.
+Fully open-source and improved replication of Kaiko.AI's CPath foundation model [Midnight](https://arxiv.org/abs/2504.05186v1).
 
-**[SophontAI](https://sophontai.com/)**
-**[MedARC](https://medarc.ai)**
+**[SophontAI](https://sophontai.com/)** · **[MedARC](https://medarc.ai)**
 
 [![Collaborate with us on Discord](https://img.shields.io/badge/Discord-Collaborate%20with%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/tVR4TWnRM9)
 
-In this repository, following a plethora of works before us, we apply DINO(V2) to the pathology space.
-If you are interested in helping out, check the open Issues.
+This is a publicly developed, open-source project by [MedARC](https://www.medarc.ai/). If you are interested in helping out, [join our Discord server](https://discord.gg/tVR4TWnRM9) and introduce yourself in our `#path-fm` channel.
 
-## Installation
+## Features
+- Trains faster with improved average benchmarking performance compared to the original Midnight-12K model (~3 days to train using 1×8×H100)
+- Streams data from Hugging Face; no need to download any data in advance (TCGA-12K is approximately 12 TB)
+- Supports single‑GPU up to multi‑node training with FSDP
+- Robust resuming from last checkpoint functionality if training gets interrupted
+- Weights & Biases (wandb) logging for monitoring/tracking model training
 
-Clone the repository 
+# Installation
 
-```shell
+Clone the repository:
+
+```bash
 git clone https://github.com/MedARC-AI/path-fm.git
 ```
 
-cd into it, then run our installation script
+Change into the directory, then run the installation script:
 
-```shell
+```bash
 ./install.sh
 ```
 
-This will create a virtual environment with all necessary packages pre-installed called "pathologydino", located as a .venv folder in the same directory as path-fm. It will automatically detect your machine's CUDA version and install the appropriate wheels.
+This will create a virtual environment, "pathologydino", with all necessary packages pre-installed, located as a .venv folder in the same directory as path-fm. It will automatically detect your machine's CUDA version and install packages appropriately.
 
-## Training Single-GPU (Short Config)
+Note: We have only personally verified training works as intended with this repository using H100 GPUs.
 
-```shell
+```bash
+source .venv/bin/activate
+wandb init
+```
+
+By default, we log model training to wandb. Run `wandb init` inside of `path-fm/` before starting your training run so that wandb is properly configured.
+
+You can now run one of our `run*.sh` scripts to train your model (see Training section below), using the YAML config specified in that script.
+
+Once you have successfully completed model training (or have downloaded our pretrained checkpoint from INSERT_LINK_HERE), you can evaluate using [Kaiko.AI's eva framework](https://github.com/kaiko-ai/eva) and the [Mahmood Lab's HEST benchmark](https://github.com/mahmoodlab/HEST) (skip to the Evaluation section below).
+
+# Training
+
+We use `run*.sh` to initiate training runs via torchrun. Depending on your compute setting, modify and run the corresponding shell script described in the relevant subsection below.
+
+We use YAML configs for specifying important hyperparameters during training. These files are located in `dinov2/configs/train/` (not in `eval_configs/`, which stores YAML configs for eva evaluation benchmarking). Our replication checkpoint specifically used `dinov2/configs/train/vitg14_reg4.yaml`.
+
+There are some variables that are specified in `run*.sh` directly (as opposed to the YAML config), such as the output directory for saving checkpoints, whether to enable resume functionality, and the specific CUDA devices you want to train with.
+
+## Training Single GPU (Short Config)
+
+```bash
 ./run_short_1gpu.sh
 ```
 
-## Training Single-Node (Full Reproduction)
+We are still working on a YAML config tweaked to support an informative, short training run on a single GPU that can be completed in under 24 hours. We hope this can be particularly useful for debugging and ablation experiments.
 
-```shell
+## Training Single Node, Multi‑GPU (Full Reproduction)
+
+```bash
 ./run_1node.sh
 ```
 
-By default, we make only 4 GPUs visible, and run on those 4. If you want to change the indexes, modify the numbers after "CUDA_VISIBLE_DEVICES=0,1,2,3".
+Train across multiple GPUs on a single node. Our released checkpoint used this script for training.
 
-If you change the number of GPUs, you will need to change the value of "--nproc_per_node=4" to properly reflect this.
+## Training Multi‑Node (Full Reproduction)
 
-By default, we use a vits, with 4 registers. This is reflected in the config. 
+Same as training single‑node multi‑GPU, except increase `NNODES` in both `run_master_node.sh` and `run_other_nodes.sh` to the number of total nodes you are training across. Then run the corresponding scripts.
 
-Output will be saved into the directory specificed by "--output_dir". Ensure that this directory does not contain any old files from training runs, or the code will attempt to resume instead.
-
-## Training Multi-Node (Full Reproduction)
-
-```shell
-./run.sh
+```bash
+./run_master_node.sh # on master node
+```
+```bash
+./run_other_nodes.sh # on non-master nodes
 ```
 
-## Evaluation
+If during training you get HTTP Error 429, try reducing the number of workers (set in the YAML config) and lowering the DataLoader's `prefetch_factor` (defined in `dinov2/train/train.py`). This error can happen when Hugging Face is being pinged too frequently during streaming. Another solution is to [download the data locally](https://huggingface.co/datasets/medarc/TCGA-12K-parquet) and replace `medarc/TCGA-12K-parquet` in `dinov2/train/train.py` with the full path to your locally downloaded dataset folder.
 
-At this time, we use [Kaiko-Eva](https://github.com/kaiko-ai/eva) for evaluation.
-In order to test the [Bach](https://arxiv.org/abs/1808.04277) dataset, you will run:
-```
-eva predict fit --config dinov2/eval_config.yaml
-```
-Please modify the checkpoint_path to match the checkpoint you wish to test.
-Trained checkpoints will be found in output_dir/eval/training_X.
+# Methods / Training Recipe
 
+Below is a high‑level overview of our training recipe, with particular attention to deviations from the original DINOv2 paper. For additional context, refer to the [Midnight paper](https://arxiv.org/abs/2504.05186).
+
+- Base model + init
+  - Student/teacher are ViT‑G/14 with 4 register tokens.
+  - We initialize the student backbone from Meta’s DINOv2 ViT‑G/14 register checkpoint via `torch.hub`.
+  - Heads are re‑initialized, as Meta only shared pretrained weights for their model backbone.
+
+- Objectives and heads
+  - DINO self‑distillation on CLS tokens, with 131072 prototypes and a 384‑dim bottleneck head. iBOT masked patch prediction on global crops. 
+  - DINOv2's KoLeo regularization is replaced by a KDE‑based entropy regularizer as done in the Midnight paper.
+
+- Data and augmentations
+  - Streaming directly from a Parquet dataset of pre-patched TCGA slides hosted on Hugging Face (medarc/TCGA-12K-parquet). See `prepatching_scripts/` and read our [hf dataset card](https://huggingface.co/datasets/medarc/TCGA-12K-parquet/blob/main/README.md) for more information on pre-patching. We read `image_bytes`, decode to RGB, and apply DINO augmentations.
+  - H&E augmentation: before normalization, images are converted to HED space and perturbed, then converted back to RGB. See `DataAugmentationDINO` in `dinov2/data/augmentations.py`.
+  - Multi‑crop: 2 global crops (224) and multiple local crops (98). iBOT masks are sampled per‑image with ratios drawn uniformly from a min/max range.
+
+- Optimization and schedules
+  - LR is scaled with sqrt(batch/1024) from a base LR of 2e‑4. Midnight paper originally used a base LR of 3.5e-4 but we observed that this led to training collapse.
+  - We train for 8000 “epochs” by schedule (1 epoch = 1250 steps), but early‑stop at 200 epochs. We found early stopping was necessary to prevent worsening downstream performance with longer model training.
+
+- Checkpointing, evaluation, logging
+  - We save LOCAL_STATE_DICT FSDP checkpoints per rank and tag `last_checkpoint.rank_*` files (for resuming functionality).
+  - The teacher weights are exported every cfg.evaluation.eval_period_iterations steps to `output_dir/eval/training_<iter>/teacher_checkpoint.pth`.
+  - Weights & Biases logging is enabled with a persistent run id stored in the output directory to support resuming, in case model training gets interrupted.
+
+# Downstream Evaluation
+
+## eva Benchmarks
+
+First ensure you have a checkpoint ready to be evaluated. Place your .pth file for your teacher checkpoint in the /checkpoints folder. You can download our pretrained checkpoint here: *insert URL here*
+
+Then, `cd` into the same `path-fm` folder cloned from our Installation steps and clone our modified GitHub repo forked from the original [kaiko-eva](https://github.com/kaiko-ai/eva):
+
+```bash
+cd path-fm
+source .venv/bin/activate
+git clone https://github.com/MedARC-AI/eva-probe
+```
+
+Then, install the eva framework to enable use of the `eva` command in your terminal (using `--no-deps` because the `path-fm` virtual environment already contains the necessary packages):
+
+```bash
+uv pip install -e './eva-probe[vision]' --no-deps
+```
+
+We provide every YAML config file we used in our replication in `path-fm/eval_configs/`. Not every dataset permits automatic downloading. For datasets like BACH that do, we automatically download the dataset when you specify `DOWNLOAD_DATA=true` when calling `eva predict_fit`. For other datasets, follow the manual download steps described in the [eva datasets documentation](https://kaiko-ai.github.io/eva/main/datasets/) and place a folder containing the dataset into `path-fm/eva-probe/data/`. Consult each dataset's specific YAML config for details on whether automatic downloading is supported; if not, modify the config to provide the path to your dataset prior to eva benchmarking.
+
+Below are the steps for running the [BACH](https://kaiko-ai.github.io/eva/main/datasets/bach/) evaluation. If your teacher checkpoint is not stored as `path-fm/checkpoints/teacher_epoch250000.pth`, you will first need to modify your eva YAML file's `checkpoint_path` variable to specify the path to your model weights.
+
+```bash
+cd eva-probe # should be located in path-fm/eva-probe
+CUDA_VISIBLE_DEVICES=0 DOWNLOAD_DATA=true eva predict_fit --config ../eval_configs/bach.yaml 
+```
+
+All eva evaluations should be run on a single GPU by setting `CUDA_VISIBLE_DEVICES=0`. We observed inconsistent and worse results when trying to evaluate using multiple GPUs.
+
+## HEST Benchmark
+
+First ensure you have a checkpoint ready to be evaluated. Place the .pth file for your teacher model in the /checkpoints folder. You can download our pretrained checkpoint here: *insert URL here*
+
+Then, `cd` into the same `path-fm` folder cloned from our Installation steps and clone the [Mahmood Lab's HEST GitHub repo](https://github.com/mahmoodlab/HEST):
+
+```bash
+cd path-fm
+source .venv/bin/activate
+git clone https://github.com/mahmoodlab/HEST.git
+```
+
+Then install HEST framework so that we can import invoke their benchmark function  (using `--no-deps` because the `path-fm` virtual environment already contains the necessary packages).
+
+```bash
+uv pip install -e ./HEST --no-deps
+```
+
+Now uncomment out specific lines in the HEST YAML config to enable PCA dimensionality reduction, benchmark across all HEST datasets, and solely benchmark our DINOv2 model as the encoder:
+
+```bash
+sed -i -E '/^datasets:/,/^\]/{s/^([[:space:]]*)#([[:space:]]*)"([^"]+)",/\1"\3",/}; s/^[[:space:]]*#([[:space:]]*dimreduce:[[:space:]]*".*")/\1/; /^encoders:/,/^\]/{s/^([[:space:]]*)"resnet50"(,?)/\1# "resnet50"\2/}' ./HEST/bench_config/bench_config.yaml
+```
+
+Then finally run our HEST_evaluation.py script to benchmark your checkpoint. Running HEST_evaluation.py will automatically download the necessary preprocessed patches and patch encoders and output results into a new `path-fm/eval` folder (specifically the `bench_data/` subfolder).
+
+```bash
+python HEST_evaluation.py
+```
 
 ## Related Work / Citation
 
@@ -71,4 +177,4 @@ Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., ...
 
 Karasikov, M., van Doorn, J., Känzig, N., Erdal Cesur, M., Horlings, H. M., Berke, R., ... & Otálora, S. (2025). Training state-of-the-art pathology foundation models with orders of magnitude less data. In International Conference on Medical Image Computing and Computer-Assisted Intervention (pp. 573-583). Cham: Springer Nature Switzerland.
 
-Kaplan, D., Grandhi, R. S., Lane, C., Warner, B., Abraham, T. M., & Scotti, P. S. (in-progress). How to Train a State-of-the-Art Pathology Foundation Model with $1.6k.
+Kaplan, D., Grandhi, R. S., Lane, C., Warner, B., Abraham, T. M., & Scotti, P. S. (in prep). How to Train a State‑of‑the‑Art Pathology Foundation Model with $1.6k.

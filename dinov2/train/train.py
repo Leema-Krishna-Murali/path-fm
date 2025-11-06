@@ -28,6 +28,10 @@ from datasets import IterableDatasetDict, load_dataset, DownloadConfig
 from PIL import Image
 import torch.utils.data
 
+import pyarrow
+import pyarrow.dataset
+import torch.distributed as dist
+
 
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
 logger = logging.getLogger("dinov2")
@@ -45,10 +49,6 @@ def _build_streaming_dataset(
     fragment_range_size: int = 128 << 20,
     epoch: int = 0,
 ):
-    import pyarrow
-    import pyarrow.dataset
-    import torch.distributed as dist
-
     # Get current rank/size at call time (safe under elastic restarts)
     world_size = dist.get_world_size() if dist.is_available() and dist.is_initialized() else 1
     global_rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
@@ -345,7 +345,6 @@ def do_train(cfg, model, resume=False):
         torch.set_num_threads(1)
         os.environ.setdefault("OMP_NUM_THREADS", "1")
 
-    prefetch_factor = 4 if cfg.train.num_workers > 0 else None
     data_loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=cfg.train.batch_size_per_gpu,
@@ -354,7 +353,7 @@ def do_train(cfg, model, resume=False):
         pin_memory=True,
         persistent_workers=True,
         collate_fn=collate_fn,
-        prefetch_factor=prefetch_factor,
+        prefetch_factor=4,
         worker_init_fn=_worker_init,
     )
 
