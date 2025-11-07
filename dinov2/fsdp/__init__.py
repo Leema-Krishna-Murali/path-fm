@@ -13,7 +13,6 @@ from fvcore.common.checkpoint import Checkpointer
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import ShardingStrategy
 from torch.distributed.fsdp import MixedPrecision
-from torch.distributed.fsdp import StateDictType
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.fsdp._runtime_utils import _reshard
@@ -97,8 +96,7 @@ class FSDPCheckpointer(Checkpointer):
             return
 
         data = {}
-        with FSDP.state_dict_type(self.model, StateDictType.LOCAL_STATE_DICT):
-            data["model"] = self.model.state_dict()
+        data["model"] = self.model.state_dict()
 
         # data["model"] = self.model.state_dict()
         for key, obj in self.checkpointables.items():
@@ -114,8 +112,7 @@ class FSDPCheckpointer(Checkpointer):
         self.tag_last_checkpoint(basename)
 
     def load(self, *args, **kwargs):
-        with FSDP.state_dict_type(self.model, StateDictType.LOCAL_STATE_DICT):
-            return super().load(*args, **kwargs)
+        return super().load(*args, **kwargs)
 
     def has_checkpoint(self) -> bool:
         """

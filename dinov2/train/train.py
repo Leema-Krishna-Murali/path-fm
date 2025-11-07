@@ -12,6 +12,7 @@ from functools import partial
 import itertools
 from io import BytesIO
 from pathlib import Path
+import gc
 
 from fvcore.common.checkpoint import PeriodicCheckpointer
 import torch
@@ -31,6 +32,13 @@ import torch.utils.data
 import pyarrow
 import pyarrow.dataset
 import torch.distributed as dist
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    StateDictType,
+    LocalStateDictConfig,
+    ShardedStateDictConfig,
+    FullStateDictConfig,
+)
 
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
 logger = logging.getLogger("dinov2")
@@ -163,15 +171,23 @@ def apply_optim_scheduler(optimizer, lr, wd, last_layer_lr):
         param_group["lr"] = (last_layer_lr if is_last_layer else lr) * lr_multiplier
 
 
-def do_test(cfg, model, iteration): # save teacher checkpoint
-    new_state_dict = model.teacher.state_dict()
+_LOCAL_STATE_DICT_CFG = LocalStateDictConfig(offload_to_cpu=True)
+_SHARDED_STATE_DICT_CFG = ShardedStateDictConfig(offload_to_cpu=True)
+_FULL_STATE_DICT_CFG = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
 
-    if distributed.is_main_process():
-        iterstring = str(iteration)
-        eval_dir = os.path.join(cfg.train.output_dir, "eval", iterstring)
-        os.makedirs(eval_dir, exist_ok=True)
-        teacher_ckp_path = os.path.join(eval_dir, "teacher_checkpoint.pth")
-        torch.save({"teacher": new_state_dict}, teacher_ckp_path)
+
+def do_test(cfg, model, iteration): # save teacher checkpoint
+    if not distributed.is_main_process():
+        return
+
+    iterstring = str(iteration)
+    eval_dir = os.path.join(cfg.train.output_dir, "eval", iterstring)
+    os.makedirs(eval_dir, exist_ok=True)
+    teacher_ckp_path = os.path.join(eval_dir, "teacher_checkpoint.pth")
+    teacher_sd = {k: v.detach().to(device="cpu") for k, v in model.teacher.state_dict().items()}
+    torch.save({"teacher": teacher_sd}, teacher_ckp_path)
+    del teacher_sd
+    gc.collect()
 
 
 def do_train(cfg, model, resume=False):
@@ -218,7 +234,8 @@ def do_train(cfg, model, resume=False):
     # checkpointer
     checkpointer = FSDPCheckpointer(model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True)
 
-    start_iter = checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
+    with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT, state_dict_config=_SHARDED_STATE_DICT_CFG):
+        start_iter = checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
 
     OFFICIAL_EPOCH_LENGTH = cfg.train.OFFICIAL_EPOCH_LENGTH
     max_iter = cfg.optim.epochs * OFFICIAL_EPOCH_LENGTH
@@ -375,7 +392,8 @@ def do_train(cfg, model, resume=False):
             if cfg.evaluation.eval_period_iterations >= 0:
                 do_test(cfg, model, f"training_{iteration}")
                 torch.cuda.synchronize()
-            checkpointer.save(f"model_{iteration:07d}", iteration=iteration)
+            with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT, state_dict_config=_SHARDED_STATE_DICT_CFG):
+                checkpointer.save(f"model_{iteration:07d}", iteration=iteration)
             break
         
         current_batch_size = data["collated_global_crops"].shape[0] / 2
@@ -465,7 +483,8 @@ def do_train(cfg, model, resume=False):
         if cfg.evaluation.eval_period_iterations >= 0 and (iteration) % cfg.evaluation.eval_period_iterations == 0:
             do_test(cfg, model, f"training_{iteration}")
             torch.cuda.synchronize()
-        periodic_checkpointer.step(iteration)
+        with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT, state_dict_config=_SHARDED_STATE_DICT_CFG):
+            periodic_checkpointer.step(iteration)
 
         iteration = iteration + 1
     metric_logger.synchronize_between_processes()
@@ -545,12 +564,13 @@ def main(args):
     logger.info("Model:\n{}".format(model))
 
     if args.eval_only:
-        iteration = (
-            FSDPCheckpointer(model, save_dir=cfg.train.output_dir)
-            .resume_or_load(cfg.MODEL.WEIGHTS, resume=not args.no_resume)
-            .get("iteration", -1)
-            + 1
-        )
+        with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT, state_dict_config=_SHARDED_STATE_DICT_CFG):
+            iteration = (
+                FSDPCheckpointer(model, save_dir=cfg.train.output_dir)
+                .resume_or_load(cfg.MODEL.WEIGHTS, resume=not args.no_resume)
+                .get("iteration", -1)
+                + 1
+            )
         return do_test(cfg, model, f"manual_{iteration}")
 
     do_train(cfg, model, resume=not args.no_resume)
