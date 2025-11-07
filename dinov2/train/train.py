@@ -13,6 +13,7 @@ import itertools
 from io import BytesIO
 from pathlib import Path
 import gc
+import contextlib
 
 from fvcore.common.checkpoint import PeriodicCheckpointer
 import torch
@@ -171,23 +172,49 @@ def apply_optim_scheduler(optimizer, lr, wd, last_layer_lr):
         param_group["lr"] = (last_layer_lr if is_last_layer else lr) * lr_multiplier
 
 
-_LOCAL_STATE_DICT_CFG = LocalStateDictConfig(offload_to_cpu=True)
 _SHARDED_STATE_DICT_CFG = ShardedStateDictConfig(offload_to_cpu=True)
 _FULL_STATE_DICT_CFG = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
 
 
 def do_test(cfg, model, iteration): # save teacher checkpoint
-    if not distributed.is_main_process():
-        return
-
+    # All ranks participate in FSDP state_dict() even with rank0_only=True
+    is_main = distributed.is_main_process()
     iterstring = str(iteration)
     eval_dir = os.path.join(cfg.train.output_dir, "eval", iterstring)
-    os.makedirs(eval_dir, exist_ok=True)
-    teacher_ckp_path = os.path.join(eval_dir, "teacher_checkpoint.pth")
-    teacher_sd = {k: v.detach().to(device="cpu") for k, v in model.teacher.state_dict().items()}
-    torch.save({"teacher": teacher_sd}, teacher_ckp_path)
+    if is_main:
+        os.makedirs(eval_dir, exist_ok=True)
+        teacher_ckp_path = os.path.join(eval_dir, "teacher_checkpoint.pth")
+
+    if isinstance(model.teacher, FSDP):
+        state_dict_module = model.teacher
+    elif isinstance(model, FSDP):
+        state_dict_module = model
+    else:
+        state_dict_module = None
+
+    state_dict_ctx = (
+        FSDP.state_dict_type(
+            state_dict_module,
+            StateDictType.FULL_STATE_DICT,
+            state_dict_config=_FULL_STATE_DICT_CFG,
+        )
+        if state_dict_module is not None
+        else contextlib.nullcontext()
+    )
+
+    with torch.no_grad(), state_dict_ctx:
+        teacher_sd = model.teacher.state_dict()
+
+    if is_main:
+        torch.save({"teacher": teacher_sd}, teacher_ckp_path)
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     del teacher_sd
-    gc.collect()
+
+    if dist.is_available() and dist.is_initialized():
+        dist.barrier()
 
 
 def do_train(cfg, model, resume=False):
@@ -231,23 +258,31 @@ def do_train(cfg, model, resume=False):
         artifact.add_file(str(Path(CONFIG_FILE_PATH)))
         run.log_artifact(artifact)
 
-    # checkpointer
-    checkpointer = FSDPCheckpointer(model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True)
+    single_gpu_run = distributed.get_global_size() <= 1
 
-    with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT, state_dict_config=_SHARDED_STATE_DICT_CFG):
-        start_iter = checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
+    if not single_gpu_run:
+        checkpointer = FSDPCheckpointer(model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True)
+        with FSDP.state_dict_type(
+            model,
+            StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=_SHARDED_STATE_DICT_CFG,
+        ):
+            start_iter = checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
+    else:
+        start_iter = 0
 
     OFFICIAL_EPOCH_LENGTH = cfg.train.OFFICIAL_EPOCH_LENGTH
     max_iter = cfg.optim.epochs * OFFICIAL_EPOCH_LENGTH
     early_stop_iter = cfg.optim.early_stop * OFFICIAL_EPOCH_LENGTH
     eta_target_iter = min(max_iter, early_stop_iter)
 
-    periodic_checkpointer = PeriodicCheckpointer(
-        checkpointer,
-        period=3 * OFFICIAL_EPOCH_LENGTH,
-        max_iter=max_iter,
-        max_to_keep=3,
-    )
+    if not single_gpu_run:
+        periodic_checkpointer = PeriodicCheckpointer(
+            checkpointer,
+            period=3 * OFFICIAL_EPOCH_LENGTH,
+            max_iter=max_iter,
+            max_to_keep=3,
+        )
 
     # setup data preprocessing
 
@@ -392,8 +427,9 @@ def do_train(cfg, model, resume=False):
             if cfg.evaluation.eval_period_iterations >= 0:
                 do_test(cfg, model, f"training_{iteration}")
                 torch.cuda.synchronize()
-            with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT, state_dict_config=_SHARDED_STATE_DICT_CFG):
-                checkpointer.save(f"model_{iteration:07d}", iteration=iteration)
+            if not single_gpu_run:
+                with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT, state_dict_config=_SHARDED_STATE_DICT_CFG):
+                    checkpointer.save(f"model_{iteration:07d}", iteration=iteration)
             break
         
         current_batch_size = data["collated_global_crops"].shape[0] / 2
@@ -483,8 +519,9 @@ def do_train(cfg, model, resume=False):
         if cfg.evaluation.eval_period_iterations >= 0 and (iteration) % cfg.evaluation.eval_period_iterations == 0:
             do_test(cfg, model, f"training_{iteration}")
             torch.cuda.synchronize()
-        with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT, state_dict_config=_SHARDED_STATE_DICT_CFG):
-            periodic_checkpointer.step(iteration)
+        if not single_gpu_run:
+            with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT, state_dict_config=_SHARDED_STATE_DICT_CFG):
+                periodic_checkpointer.step(iteration)
 
         iteration = iteration + 1
     metric_logger.synchronize_between_processes()

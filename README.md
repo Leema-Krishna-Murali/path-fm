@@ -153,6 +153,9 @@ Then, `cd` into the same `path-fm` folder cloned from our Installation steps and
 cd path-fm
 source .venv/bin/activate
 git clone https://github.com/mahmoodlab/HEST.git
+cd HEST
+git checkout afd42c3143092c51e6bcc0f1df65bbf58a467e5e
+cd .. # cd back to path-fm/ for subsequent install steps
 ```
 
 Then install HEST framework so that we can import invoke their benchmark function  (using `--no-deps` because the `path-fm` virtual environment already contains the necessary packages).
