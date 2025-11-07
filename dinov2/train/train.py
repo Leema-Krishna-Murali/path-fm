@@ -33,11 +33,13 @@ import torch.utils.data
 import pyarrow
 import pyarrow.dataset
 import torch.distributed as dist
+
+import pyarrow
+import pyarrow.dataset
+import torch.distributed as dist
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     StateDictType,
-    LocalStateDictConfig,
-    ShardedStateDictConfig,
     FullStateDictConfig,
 )
 
@@ -171,12 +173,9 @@ def apply_optim_scheduler(optimizer, lr, wd, last_layer_lr):
         param_group["weight_decay"] = wd * wd_multiplier
         param_group["lr"] = (last_layer_lr if is_last_layer else lr) * lr_multiplier
 
-
-_SHARDED_STATE_DICT_CFG = ShardedStateDictConfig(offload_to_cpu=True)
 _FULL_STATE_DICT_CFG = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
 
-
-def do_test(cfg, model, iteration): # save teacher checkpoint
+def do_test(cfg, model, iteration): # save teacher checkpoint (used for eval only)
     # All ranks participate in FSDP state_dict() even with rank0_only=True
     is_main = distributed.is_main_process()
     iterstring = str(iteration)
@@ -221,6 +220,8 @@ def do_train(cfg, model, resume=False):
     model.train()
     inputs_dtype = torch.half
     fp16_scaler = model.fp16_scaler  # for mixed precision training
+    single_gpu_run = distributed.get_global_size() <= 1
+    if single_gpu_run: print("\n\nSINGLE GPU RUN, SKIPPING FSDP CHECKPOINTING\n\n")
 
     # setup optimizer
 
@@ -258,16 +259,10 @@ def do_train(cfg, model, resume=False):
         artifact.add_file(str(Path(CONFIG_FILE_PATH)))
         run.log_artifact(artifact)
 
-    single_gpu_run = distributed.get_global_size() <= 1
-
+    # checkpointer
     if not single_gpu_run:
         checkpointer = FSDPCheckpointer(model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True)
-        with FSDP.state_dict_type(
-            model,
-            StateDictType.SHARDED_STATE_DICT,
-            state_dict_config=_SHARDED_STATE_DICT_CFG,
-        ):
-            start_iter = checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
+        start_iter = checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
     else:
         start_iter = 0
 
@@ -428,8 +423,7 @@ def do_train(cfg, model, resume=False):
                 do_test(cfg, model, f"training_{iteration}")
                 torch.cuda.synchronize()
             if not single_gpu_run:
-                with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT, state_dict_config=_SHARDED_STATE_DICT_CFG):
-                    checkpointer.save(f"model_{iteration:07d}", iteration=iteration)
+                checkpointer.save(f"model_{iteration:07d}", iteration=iteration)
             break
         
         current_batch_size = data["collated_global_crops"].shape[0] / 2
@@ -520,8 +514,7 @@ def do_train(cfg, model, resume=False):
             do_test(cfg, model, f"training_{iteration}")
             torch.cuda.synchronize()
         if not single_gpu_run:
-            with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT, state_dict_config=_SHARDED_STATE_DICT_CFG):
-                periodic_checkpointer.step(iteration)
+            periodic_checkpointer.step(iteration)
 
         iteration = iteration + 1
     metric_logger.synchronize_between_processes()
@@ -600,14 +593,13 @@ def main(args):
     model.prepare_for_distributed_training()
     logger.info("Model:\n{}".format(model))
 
-    if args.eval_only:
-        with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT, state_dict_config=_SHARDED_STATE_DICT_CFG):
-            iteration = (
-                FSDPCheckpointer(model, save_dir=cfg.train.output_dir)
-                .resume_or_load(cfg.MODEL.WEIGHTS, resume=not args.no_resume)
-                .get("iteration", -1)
-                + 1
-            )
+    if args.eval_only and not single_gpu_run:
+        iteration = (
+            FSDPCheckpointer(model, save_dir=cfg.train.output_dir)
+            .resume_or_load(cfg.MODEL.WEIGHTS, resume=not args.no_resume)
+            .get("iteration", -1)
+            + 1
+        )
         return do_test(cfg, model, f"manual_{iteration}")
 
     do_train(cfg, model, resume=not args.no_resume)
