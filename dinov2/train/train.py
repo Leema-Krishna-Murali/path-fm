@@ -417,7 +417,7 @@ def do_train(cfg, model, resume=False):
         eta_target_iter,
         start_iter,
     ):
-        if iteration >= early_stop_iter:
+        if iteration > early_stop_iter:
             logger.info("Early stopping at iteration {}".format(iteration))
             if cfg.evaluation.eval_period_iterations >= 0:
                 do_test(cfg, model, f"training_{iteration}")
