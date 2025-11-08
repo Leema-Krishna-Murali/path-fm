@@ -15,9 +15,9 @@ if ! command -v uv >/dev/null 2>&1; then
   INSTALLER_URL="${UV_INSTALLER_URL:-$DEFAULT_INSTALLER_URL}"
   echo "uv not found on PATH; installing from ${INSTALLER_URL}..."
   if command -v curl >/dev/null 2>&1; then
-    curl -LsSf "${INSTALLER_URL}" sh
+    curl -LsSf "${INSTALLER_URL}" | sh
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO- "${INSTALLER_URL}" sh
+    wget -qO- "${INSTALLER_URL}" | sh
   else
     echo "Neither curl nor wget is available; please install one and re-run." >&2
     exit 1
