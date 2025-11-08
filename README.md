@@ -52,6 +52,8 @@ We use YAML configs for specifying important hyperparameters during training. Th
 
 There are some variables that are specified in `run*.sh` directly (as opposed to the YAML config), such as the output directory for saving checkpoints, whether to enable resume functionality, and the specific CUDA devices you want to train with.
 
+If you are getting rate limited by huggingface, one easy method to increase your rate is to first `export HF_TOKEN=<your HF token here>` before running your code (https://huggingface.co/settings/tokens).
+
 ## Training Single GPU (Short Config)
 
 ```bash
