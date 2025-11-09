@@ -323,7 +323,8 @@ class SSLMetaArch(nn.Module):
                 loss_dict["koleo_loss"] = (
                     koleo_loss / loss_scales
                 )  # this is to display the same losses as before but we can remove eventually
-                print(self.cfg.dino.kolea_loss_weight)
+                print(self.cfg.dino.koleo_loss_weight)
+
             if self.do_kde:
                 kde_loss = self.cfg.dino.kde_loss_weight * sum(
                     self.kde_loss(p) for p in student_cls_tokens.chunk(2)
