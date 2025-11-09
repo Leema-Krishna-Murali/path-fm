@@ -611,3 +611,4 @@ if __name__ == "__main__":
         raise ValueError("config file path must be provided")
     CONFIG_FILE_PATH = os.path.abspath(args.config_file)
     main(args)
+
