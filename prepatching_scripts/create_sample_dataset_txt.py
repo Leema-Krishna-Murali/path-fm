@@ -1,4 +1,3 @@
-from dinov2.data.datasets.slide_dataset import *
 import cv2
 import random
 from openslide import OpenSlide
