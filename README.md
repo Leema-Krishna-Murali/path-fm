@@ -1,4 +1,4 @@
-# Path-FM-0
+# OpenMidnight
 
 Fully open-source and improved replication of Kaiko.AI's CPath foundation model [Midnight](https://arxiv.org/abs/2504.05186v1).
 
@@ -6,7 +6,7 @@ Fully open-source and improved replication of Kaiko.AI's CPath foundation model 
 
 [![Collaborate with us on Discord](https://img.shields.io/badge/Discord-Collaborate%20with%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/tVR4TWnRM9)
 
-This is a publicly developed, open-source project by [MedARC](https://www.medarc.ai/). If you are interested in helping out, [join our Discord server](https://discord.gg/tVR4TWnRM9) and introduce yourself in our `#path-fm` channel.
+This is a publicly developed, open-source project by [MedARC](https://www.medarc.ai/). If you are interested in helping out, [join our Discord server](https://discord.gg/tVR4TWnRM9) and introduce yourself in our `#openmidnight` channel.
 
 ## Features
 - Trains faster with improved average benchmarking performance compared to the original Midnight-12K model (~3 days to train using 1×8×H100)
@@ -20,7 +20,7 @@ This is a publicly developed, open-source project by [MedARC](https://www.medarc
 Clone the repository:
 
 ```bash
-git clone https://github.com/MedARC-AI/path-fm.git
+git clone https://github.com/MedARC-AI/openmidnight.git
 ```
 
 Change into the directory, then run the installation script:
@@ -29,7 +29,7 @@ Change into the directory, then run the installation script:
 ./install.sh
 ```
 
-This will create a virtual environment, "pathologydino", with all necessary packages pre-installed, located as a .venv folder in the same directory as path-fm. It will automatically detect your machine's CUDA version and install packages appropriately.
+This will create a virtual environment, "pathologydino", with all necessary packages pre-installed, located as a .venv folder in the same directory as openmidnight. It will automatically detect your machine's CUDA version and install packages appropriately.
 
 Note: We have only personally verified training works as intended with this repository using H100 GPUs.
 
@@ -38,7 +38,7 @@ source .venv/bin/activate
 wandb init
 ```
 
-By default, we log model training to wandb. Run `wandb init` inside of `path-fm/` before starting your training run so that wandb is properly configured.
+By default, we log model training to wandb. Run `wandb init` inside of `openmidnight/` before starting your training run so that wandb is properly configured.
 
 You can now run one of our `run*.sh` scripts to train your model (see Training section below), using the YAML config specified in that script.
 
@@ -120,26 +120,26 @@ Below is a high‑level overview of our training recipe, with particular attenti
 
 First ensure you have a checkpoint ready to be evaluated. Place your .pth file for your teacher checkpoint in the /checkpoints folder. You can download our pretrained checkpoint here: *insert URL here*
 
-Then, `cd` into the same `path-fm` folder cloned from our Installation steps and clone our modified GitHub repo forked from the original [kaiko-eva](https://github.com/kaiko-ai/eva):
+Then, `cd` into the same `openmidnight` folder cloned from our Installation steps and clone our modified GitHub repo forked from the original [kaiko-eva](https://github.com/kaiko-ai/eva):
 
 ```bash
-cd path-fm
+cd openmidnight
 source .venv/bin/activate
 git clone https://github.com/MedARC-AI/eva-probe
 ```
 
-Then, install the eva framework to enable use of the `eva` command in your terminal (using `--no-deps` because the `path-fm` virtual environment already contains the necessary packages):
+Then, install the eva framework to enable use of the `eva` command in your terminal (using `--no-deps` because the `openmidnight` virtual environment already contains the necessary packages):
 
 ```bash
 uv pip install -e './eva-probe[vision]' --no-deps
 ```
 
-We provide every YAML config file we used in our replication in `path-fm/eval_configs/`. Not every dataset permits automatic downloading. For datasets like BACH that do, we automatically download the dataset when you specify `DOWNLOAD_DATA=true` when calling `eva predict_fit`. For other datasets, follow the manual download steps described in the [eva datasets documentation](https://kaiko-ai.github.io/eva/main/datasets/) and place a folder containing the dataset into `path-fm/eva-probe/data/`. Consult each dataset's specific YAML config for details on whether automatic downloading is supported; if not, modify the config to provide the path to your dataset prior to eva benchmarking.
+We provide every YAML config file we used in our replication in `openmidnight/eval_configs/`. Not every dataset permits automatic downloading. For datasets like BACH that do, we automatically download the dataset when you specify `DOWNLOAD_DATA=true` when calling `eva predict_fit`. For other datasets, follow the manual download steps described in the [eva datasets documentation](https://kaiko-ai.github.io/eva/main/datasets/) and place a folder containing the dataset into `openmidnight/eva-probe/data/`. Consult each dataset's specific YAML config for details on whether automatic downloading is supported; if not, modify the config to provide the path to your dataset prior to eva benchmarking.
 
-Below are the steps for running the [BACH](https://kaiko-ai.github.io/eva/main/datasets/bach/) evaluation. If your teacher checkpoint is not stored as `path-fm/checkpoints/teacher_epoch250000.pth`, you will first need to modify your eva YAML file's `checkpoint_path` variable to specify the path to your model weights.
+Below are the steps for running the [BACH](https://kaiko-ai.github.io/eva/main/datasets/bach/) evaluation. If your teacher checkpoint is not stored as `openmidnight/checkpoints/teacher_epoch250000.pth`, you will first need to modify your eva YAML file's `checkpoint_path` variable to specify the path to your model weights.
 
 ```bash
-cd eva-probe # should be located in path-fm/eva-probe
+cd eva-probe # should be located in openmidnight/eva-probe
 CUDA_VISIBLE_DEVICES=0 DOWNLOAD_DATA=true eva predict_fit --config ../eval_configs/bach.yaml 
 ```
 
@@ -149,18 +149,18 @@ All eva evaluations should be run on a single GPU by setting `CUDA_VISIBLE_DEVIC
 
 First ensure you have a checkpoint ready to be evaluated. Place the .pth file for your teacher model in the /checkpoints folder. You can download our pretrained checkpoint here: *insert URL here*
 
-Then, `cd` into the same `path-fm` folder cloned from our Installation steps and clone the [Mahmood Lab's HEST GitHub repo](https://github.com/mahmoodlab/HEST):
+Then, `cd` into the same `openmidnight` folder cloned from our Installation steps and clone the [Mahmood Lab's HEST GitHub repo](https://github.com/mahmoodlab/HEST):
 
 ```bash
-cd path-fm
+cd openmidnight
 source .venv/bin/activate
 git clone https://github.com/mahmoodlab/HEST.git
 cd HEST
 git checkout afd42c3143092c51e6bcc0f1df65bbf58a467e5e
-cd .. # cd back to path-fm/ for subsequent install steps
+cd .. # cd back to openmidnight/ for subsequent install steps
 ```
 
-Then install HEST framework so that we can import invoke their benchmark function  (using `--no-deps` because the `path-fm` virtual environment already contains the necessary packages).
+Then install HEST framework so that we can import invoke their benchmark function  (using `--no-deps` because the `openmidnight` virtual environment already contains the necessary packages).
 
 ```bash
 uv pip install -e ./HEST --no-deps
@@ -172,7 +172,7 @@ Now uncomment out specific lines in the HEST YAML config to enable PCA dimension
 sed -i -E '/^datasets:/,/^\]/{s/^([[:space:]]*)#([[:space:]]*)"([^"]+)",/\1"\3",/;s/^([[:space:]]*)"HCC"(,?)/\1# "HCC"\2/}; s/^[[:space:]]*#([[:space:]]*dimreduce:[[:space:]]*".*")/\1/; /^encoders:/,/^\]/{s/^([[:space:]]*)"resnet50"(,?)/\1# "resnet50"\2/}' ./HEST/bench_config/bench_config.yaml
 ```
 
-Then finally run our HEST_evaluation.py script to benchmark your checkpoint. Running HEST_evaluation.py will automatically download the necessary preprocessed patches and patch encoders and output results into a new `path-fm/eval` folder (specifically, the benchmark results dump to the `ST_pred_results/` subfolder).
+Then finally run our HEST_evaluation.py script to benchmark your checkpoint. Running HEST_evaluation.py will automatically download the necessary preprocessed patches and patch encoders and output results into a new `openmidnight/eval` folder (specifically, the benchmark results dump to the `ST_pred_results/` subfolder).
 
 ```bash
 python HEST_evaluation.py
