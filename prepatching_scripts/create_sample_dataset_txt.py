@@ -1,15 +1,13 @@
 import cv2
 import random
-from pathlib import Path
 from openslide import OpenSlide
 import numpy as np
 
-data_root = Path("/data/TCGA")
+# Initialize the dataset
+dataset = SlideDataset("/data/TCGA")
 output_filename = "sample_dataset_30.txt"
-patch_size = 224
-max_tries = 1000
 
-def hsv(tile_rgb):
+def hsv(tile_rgb, patch_size):
     """
     Checks if a given tile has a high concentration of tissue based on an HSV mask.
     """
@@ -33,10 +31,9 @@ def hsv(tile_rgb):
     else:
         return None
 
+# --- Main execution loop ---
 finish = 3072 * 1000000
-svs_files = sorted(str(path) for path in data_root.rglob("*.svs"))
-if not svs_files:
-    raise RuntimeError(f"No SVS files found under {data_root}")
+datas = dataset.image_files_svs
 
 # Open the output file in write mode ('w')
 # This will create the file if it doesn't exist or overwrite it if it does.
@@ -44,8 +41,15 @@ with open(output_filename, 'w') as f:
     print(f"Starting patch sampling. Output will be saved to {output_filename}")
     
     for e in range(0, finish):
-        for path in svs_files:
-            image = OpenSlide(path)
+        for i in range(0, len(datas)):
+            path = datas[i]
+            try:
+                image = OpenSlide(path)
+            except Exception as exc:
+                print(f"Could not open {path}: {exc}")
+                continue # Skip to the next image
+
+            patch_size = 224
             
             # Iterate through each level of the slide
             for level in range(0, image.level_count):
@@ -69,7 +73,7 @@ with open(output_filename, 'w') as f:
                     patch = image.read_region((x, y), level=level, size=(patch_size, patch_size))
                     
                     # Check if the patch contains enough tissue
-                    res = hsv(patch)
+                    res = hsv(patch, (patch_size, patch_size))
                     
                     if res is not None:
                         # If the patch is valid, write its info to the file
@@ -77,18 +81,8 @@ with open(output_filename, 'w') as f:
                         f.write(output_line)
                         break # Move to the next level/image
                 
-                    if tries >= max_tries:
+                    if tries >= 1000:
                         # If 1000 random patches at this level are invalid, move on
                         break
-            image.close()
-
-# Shuffle the collected entries once generation finishes
-with open(output_filename, 'r') as f:
-    lines = f.readlines()
-
-random.shuffle(lines)
-
-with open(output_filename, 'w') as f:
-    f.writelines(lines)
 
 print("Done")

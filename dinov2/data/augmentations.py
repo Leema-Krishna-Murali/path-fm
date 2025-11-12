@@ -208,6 +208,9 @@ class DataAugmentationDINO(object):
             save_image(global_crop_2, "global2.png")
             save_image(self.global_nohed(im1_base), "global1_nohed.png")
             save_image(self.global_nohed2(im2_base), "global2_nohed.png")
+            save_image(global_crop_1, "global.png")
+            save_image(global_crop_2, "global2.png")
+            exit()
         # global crops for teacher:
         output["global_crops_teacher"] = [global_crop_1, global_crop_2]
 
@@ -218,8 +221,6 @@ class DataAugmentationDINO(object):
         if False:
             for i, local in enumerate(local_crops):
                 save_image(local, str(i) + "local" + ".png")
-            
-            
             local_crops_new = [
                     self.local_nohed(self.geometric_augmentation_local(image)) for _ in range(self.local_crops_number)
                 ]
@@ -237,7 +238,6 @@ class DataAugmentationDINO(object):
 
                 
             exit()
-
         output["local_crops"] = local_crops
         output["offsets"] = ()
 

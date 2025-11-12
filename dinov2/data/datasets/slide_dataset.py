@@ -173,3 +173,4 @@ class SlideDataset(ExtendedVisionDataset):
 
     def __len__(self) -> int:
         return len(self.image_files)
+
