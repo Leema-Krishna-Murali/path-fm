@@ -42,6 +42,7 @@ if not svs_files:
 # This will create the file if it doesn't exist or overwrite it if it does.
 with open(output_filename, 'w') as f:
     print(f"Starting patch sampling. Output will be saved to {output_filename}")
+    print("\nFor our OpenMidnight checkpoint we ran this script until we reached 29 million patches and then manually force-quit the script. You can adjust the 'finish' variable as needed.")
     
     for e in range(0, finish):
         for path in svs_files:

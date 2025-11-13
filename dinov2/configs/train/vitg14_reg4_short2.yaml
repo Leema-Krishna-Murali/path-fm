@@ -9,6 +9,7 @@ ibot:
   separate_head: true
   head_n_prototypes: 131072
 train:
+  streaming_from_hf: True
   batch_size_per_gpu: 44 # lowered from 48 to avoid CUDA OOM on 1 GPU
   centering: sinkhorn_knopp
   use_pretrained: True
