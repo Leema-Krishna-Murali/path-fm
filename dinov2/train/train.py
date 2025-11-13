@@ -561,15 +561,6 @@ def main(args):
         print(model_pretrained.pos_embed.shape) #1, 1360, 384. We lose pos embed because it was 518
         print(model.student.backbone.pos_embed.shape) #1, 257, 384
 
-        # # Interpolate pos embed (only has an effect if you are training smaller model size than vitG)
-        # # note: the below seems to be doing 1d interpolation, but you need 2d interp
-        # # https://github.com/huggingface/pytorch-image-models/blob/47c18f4b6419d34ada6e5deba2463727f3b219f2/timm/layers/pos_embed.py#L47-L49
-        # source = model_pretrained.pos_embed.transpose(1, 2)
-        # size = model.student.backbone.pos_embed.shape[1]
-        # interpolated = torch.nn.functional.interpolate(source, size=size, mode='linear', align_corners=False)
-        # interpolated_embeddings = interpolated.transpose(1, 2)
-        # model.student.pos_embed = interpolated_embeddings
-
         # We need to make sure we grab *all* of the keys.
         # For each block, copy weights over.
         layers = []
