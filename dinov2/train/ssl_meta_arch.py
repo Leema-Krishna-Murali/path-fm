@@ -9,9 +9,9 @@ import logging
 import torch
 from torch import nn
 
-from dinov2.loss import DINOLoss, iBOTPatchLoss, KoLeoLoss, KDELoss
+from dinov2.loss import DINOLoss, iBOTPatchLoss, KoLeoLoss, KDELoss, collapse_proof_loss
 from dinov2.models import build_model_from_cfg
-from dinov2.layers import DINOHead
+from dinov2.layers import DINOHead, CollapseProofProjector
 from dinov2.utils.utils import has_batchnorms
 from dinov2.utils.param_groups import get_params_groups_with_decay, fuse_params_groups
 from dinov2.fsdp import get_fsdp_wrapper, ShardedGradScaler, get_fsdp_modules, reshard_fsdp_model
@@ -55,6 +55,7 @@ class SSLMetaArch(nn.Module):
         self.do_kde = cfg.dino.kde_loss_weight > 0
         self.do_ibot = cfg.ibot.loss_weight > 0
         self.ibot_separate_head = cfg.ibot.separate_head
+        self.do_collapse_proof = hasattr(cfg, "collapse_proof") and cfg.collapse_proof.enabled
 
         logger.info("OPTIONS -- DINO")
         if self.do_dino:
@@ -113,6 +114,27 @@ class SSLMetaArch(nn.Module):
                 teacher_model_dict["ibot_head"] = ibot_head()
             else:
                 logger.info("OPTIONS -- IBOT -- head shared with DINO")
+
+        if self.do_collapse_proof:
+            logger.info("OPTIONS -- Collapse-Proof")
+            logger.info(f"OPTIONS -- Collapse-Proof -- loss_weight: {cfg.collapse_proof.loss_weight}")
+            logger.info(f"OPTIONS -- Collapse-Proof -- proj_hidden_dim: {cfg.collapse_proof.proj_hidden_dim}")
+            logger.info(f"OPTIONS -- Collapse-Proof -- proj_output_dim: {cfg.collapse_proof.proj_output_dim}")
+            logger.info(f"OPTIONS -- Collapse-Proof -- beta: {cfg.collapse_proof.beta}")
+
+            projector_kwargs = dict(
+                input_dim=embed_dim,
+                hidden_dim=cfg.collapse_proof.proj_hidden_dim,
+                output_dim=cfg.collapse_proof.proj_output_dim,
+                epsilon=cfg.collapse_proof.epsilon,
+                random_sign_seed=getattr(cfg.collapse_proof, "random_sign_seed", None),
+            )
+
+            student_model_dict["collapse_projector"] = CollapseProofProjector(**projector_kwargs)
+            teacher_model_dict["collapse_projector"] = CollapseProofProjector(**projector_kwargs)
+
+            self.collapse_proof_loss_weight = cfg.collapse_proof.loss_weight
+            self.collapse_proof_beta = cfg.collapse_proof.beta
 
         self.need_to_synchronize_fsdp_streams = True
 
@@ -354,6 +376,20 @@ class SSLMetaArch(nn.Module):
             # accumulate loss
             loss_accumulator += self.ibot_loss_weight * ibot_patch_loss
 
+        if self.do_collapse_proof:
+            collapse_inputs = student_global_backbone_output_dict["x_norm_clstoken"]
+            projected_codes = self.student.collapse_projector(collapse_inputs)
+            if projected_codes.shape[0] % n_global_crops != 0:
+                raise AssertionError(
+                    "Collapse-proof integration expects the number of global crops to divide the batch size."
+                )
+            collapse_chunks = projected_codes.chunk(n_global_crops)
+            if len(collapse_chunks) != n_global_crops:
+                raise AssertionError("Expected to obtain one projected tensor per global crop.")
+            collapse_loss = collapse_proof_loss(collapse_chunks[0], collapse_chunks[1], beta=self.collapse_proof_beta)
+            loss_dict["collapse_proof_loss"] = collapse_loss
+            loss_accumulator += self.collapse_proof_loss_weight * collapse_loss
+
         self.backprop_loss(loss_accumulator)
 
         self.fsdp_synchronize_streams()
@@ -368,6 +404,9 @@ class SSLMetaArch(nn.Module):
                 setattr(self.student.dino_head, attr, stream)
                 setattr(self.teacher.dino_head, attr, stream)
                 setattr(self.student.backbone, attr, stream)
+                if self.do_collapse_proof:
+                    setattr(self.student.collapse_projector, attr, stream)
+                    setattr(self.teacher.collapse_projector, attr, stream)
             self.need_to_synchronize_fsdp_streams = False
 
     def update_teacher(self, m):

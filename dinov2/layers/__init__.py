@@ -10,3 +10,4 @@ from .patch_embed import PatchEmbed
 from .swiglu_ffn import SwiGLUFFN, SwiGLUFFNFused, SwiGLUFFNAligned
 from .block import NestedTensorBlock, CausalAttentionBlock
 from .attention import Attention, MemEffAttention
+from .collapse_projector import CollapseProofProjector

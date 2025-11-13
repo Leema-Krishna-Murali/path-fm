@@ -1,0 +1,38 @@
+dino:
+  head_n_prototypes: 131072
+  head_bottleneck_dim: 384
+  do_kde: True
+  kde_loss_weight: .05
+  koleo_loss_weight: 0
+  do_koleo: False
+ibot:
+  separate_head: true
+  head_n_prototypes: 131072
+train:
+  OFFICIAL_EPOCH_LENGTH: 100
+  batch_size_per_gpu: 16
+  centering: sinkhorn_knopp
+student:
+  arch: vit_small
+  patch_size: 14
+  drop_path_rate: 0.4
+  ffn_layer: mlp
+  block_chunks: 4
+  num_register_tokens: 4
+teacher:
+  momentum_teacher: 0.994
+optim:
+  epochs: 2
+  weight_decay_end: 0.2
+  base_lr: 2.0e-04
+  layerwise_decay: 1.0
+crops:
+  local_crops_size: 98
+collapse_proof:
+  enabled: true
+  loss_weight: 1.0
+  proj_hidden_dim: 512
+  proj_output_dim: 1024
+  beta: 0.05
+  epsilon: 1.0e-08
+  random_sign_seed: 42
