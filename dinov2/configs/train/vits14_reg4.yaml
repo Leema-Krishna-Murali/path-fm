@@ -31,3 +31,8 @@ optim:
   layerwise_decay: 1.0
 crops:
   local_crops_size: 98
+collapse_proof:
+  loss_weight: 1.0
+  beta: 1.0
+  proj_hidden_dim: 2048
+  proj_output_dim: 16384

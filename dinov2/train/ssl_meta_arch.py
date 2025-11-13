@@ -9,9 +9,9 @@ import logging
 import torch
 from torch import nn
 
-from dinov2.loss import DINOLoss, iBOTPatchLoss, KoLeoLoss, KDELoss
+from dinov2.loss import DINOLoss, iBOTPatchLoss, KoLeoLoss, KDELoss, cplearn_loss_func
 from dinov2.models import build_model_from_cfg
-from dinov2.layers import DINOHead
+from dinov2.layers import DINOHead, CollapseProofProjector
 from dinov2.utils.utils import has_batchnorms
 from dinov2.utils.param_groups import get_params_groups_with_decay, fuse_params_groups
 from dinov2.fsdp import get_fsdp_wrapper, ShardedGradScaler, get_fsdp_modules, reshard_fsdp_model
@@ -55,6 +55,10 @@ class SSLMetaArch(nn.Module):
         self.do_kde = cfg.dino.kde_loss_weight > 0
         self.do_ibot = cfg.ibot.loss_weight > 0
         self.ibot_separate_head = cfg.ibot.separate_head
+        self.collapse_proof_cfg = getattr(cfg, "collapse_proof", None)
+        self.do_collapse_proof = (
+            self.collapse_proof_cfg is not None and self.collapse_proof_cfg.loss_weight > 0
+        )
 
         logger.info("OPTIONS -- DINO")
         if self.do_dino:
@@ -94,7 +98,9 @@ class SSLMetaArch(nn.Module):
             self.ibot_loss_weight = cfg.ibot.loss_weight
             assert max(cfg.ibot.mask_ratio_min_max) > 0, "please provide a positive mask ratio tuple for ibot"
             assert cfg.ibot.mask_sample_probability > 0, "please provide a positive mask probability for ibot"
-            self.ibot_out_dim = cfg.ibot.head_n_prototypes if self.ibot_separate_head else cfg.dino.head_n_prototypes
+            self.ibot_out_dim = (
+                cfg.ibot.head_n_prototypes if self.ibot_separate_head else cfg.dino.head_n_prototypes
+            )
             self.ibot_patch_loss = iBOTPatchLoss(self.ibot_out_dim)
             if self.ibot_separate_head:
                 logger.info(f"OPTIONS -- IBOT -- loss_weight: {cfg.ibot.loss_weight}")
@@ -113,6 +119,26 @@ class SSLMetaArch(nn.Module):
                 teacher_model_dict["ibot_head"] = ibot_head()
             else:
                 logger.info("OPTIONS -- IBOT -- head shared with DINO")
+
+        if self.do_collapse_proof:
+            self.collapse_proof_loss_weight = self.collapse_proof_cfg.loss_weight
+            self.collapse_proof_beta = self.collapse_proof_cfg.beta
+            collapse_head = CollapseProofProjector(
+                in_dim=embed_dim,
+                hidden_dim=self.collapse_proof_cfg.proj_hidden_dim,
+                output_dim=self.collapse_proof_cfg.proj_output_dim,
+                epsilon=self.collapse_proof_cfg.epsilon,
+            )
+            student_model_dict["collapse_proof_head"] = collapse_head
+            teacher_model_dict["collapse_proof_head"] = CollapseProofProjector(
+                in_dim=embed_dim,
+                hidden_dim=self.collapse_proof_cfg.proj_hidden_dim,
+                output_dim=self.collapse_proof_cfg.proj_output_dim,
+                epsilon=self.collapse_proof_cfg.epsilon,
+            )
+        else:
+            self.collapse_proof_loss_weight = 0.0
+            self.collapse_proof_beta = 0.0
 
         self.need_to_synchronize_fsdp_streams = True
 
@@ -249,6 +275,14 @@ class SSLMetaArch(nn.Module):
         # 1b: global crops cls tokens
         student_global_cls_tokens = student_global_backbone_output_dict["x_norm_clstoken"]
         inputs_for_student_head_list.append(student_global_cls_tokens.unsqueeze(0))
+
+        if self.do_collapse_proof:
+            collapse_head = self.student["collapse_proof_head"]
+            collapse_features = collapse_head(student_global_cls_tokens)
+            z1, z2 = collapse_features.chunk(n_global_crops)
+            collapse_proof_loss = cplearn_loss_func(z1, z2, beta=self.collapse_proof_beta)
+            loss_dict["collapse_proof_loss"] = collapse_proof_loss
+            loss_accumulator += self.collapse_proof_loss_weight * collapse_proof_loss
 
         # 1c: global crops patch tokens
         if do_ibot:
