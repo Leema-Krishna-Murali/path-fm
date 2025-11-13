@@ -52,7 +52,8 @@ with open(output_filename, 'w') as f:
             for level in range(0, image.level_count):
                 
                 # Get dimensions for the current level being processed
-                width, height = image.level_dimensions[level]
+                height = image.level_dimensions[0][1]
+                width = image.level_dimensions[0][0]
                 
                 # Ensure dimensions are valid for patch extraction
                 if width < patch_size or height < patch_size:
