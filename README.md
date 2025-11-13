@@ -4,16 +4,18 @@ Fully open-source and improved replication of Kaiko.AI's CPath foundation model 
 
 **[SophontAI](https://sophontai.com/)** · **[MedARC](https://medarc.ai)**
 
+[![Read the OpenMidnight blog](https://img.shields.io/badge/Blog-Training%20SOTA%20Pathology%20Foundation%20Model%20with%20%241.6k-111827?style=for-the-badge&logo=read.cv&logoColor=white)](https://sophont.med/blog/openmidnight)
+
 [![Collaborate with us on Discord](https://img.shields.io/badge/Discord-Collaborate%20with%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/tVR4TWnRM9)
 
 This is a publicly developed, open-source project by [MedARC](https://www.medarc.ai/). If you are interested in helping out, [join our Discord server](https://discord.gg/tVR4TWnRM9) and introduce yourself in our `#path-fm` channel.
 
 ## Features
 - Trains faster with improved average benchmarking performance compared to the original Midnight-12K model (~3 days to train using 1×8×H100)
-- Streams data from Hugging Face; no need to download any data in advance (TCGA-12K is approximately 12 TB)
 - Supports single‑GPU up to multi‑node training with FSDP
 - Robust resuming from last checkpoint functionality if training gets interrupted
 - Weights & Biases (wandb) logging for monitoring/tracking model training
+- Optionally stream data from Hugging Face so no need to download any data in advance (TCGA-12K is approximately 12 TB)
 
 # Installation
 
@@ -42,7 +44,7 @@ By default, we log model training to wandb. Run `wandb init` inside of `openmidn
 
 You can now run one of our `run*.sh` scripts to train your model (see Training section below), using the YAML config specified in that script.
 
-Once you have successfully completed model training (or have downloaded our pretrained checkpoint from INSERT_LINK_HERE), you can evaluate using [Kaiko.AI's eva framework](https://github.com/kaiko-ai/eva) and the [Mahmood Lab's HEST benchmark](https://github.com/mahmoodlab/HEST) (skip to the Evaluation section below).
+Once you have successfully completed model training (or have downloaded [our pretrained checkpoint](https://huggingface.co/SophontAI/OpenMidnight/blob/main/teacher_checkpoint.pth)), you can evaluate using [Kaiko.AI's eva framework](https://github.com/kaiko-ai/eva) and the [Mahmood Lab's HEST benchmark](https://github.com/mahmoodlab/HEST) (skip to the Evaluation section below).
 
 # Training
 
@@ -53,6 +55,10 @@ We use YAML configs for specifying important hyperparameters during training. Th
 There are some variables that are specified in `run*.sh` directly (as opposed to the YAML config), such as the output directory for saving checkpoints, whether to enable resume functionality, and the specific CUDA devices you want to train with.
 
 If you are getting rate limited by huggingface, one easy method to increase your rate is to first `export HF_TOKEN=<your HF token here>` before running your code (https://huggingface.co/settings/tokens).
+
+## Dataset prep
+
+If you are wanting to exactly replicate our checkpoint, note that we did not train via streaming from huggingface. This feature was subsequently added and needs to be enabled in your YAML config (`train.streaming_from_hf=[True,False]`). Unless you enable this, you will need to first locally download the TCGA-12K dataset (~12TB) and then use the scripts provided in `prepatching_scripts/` to create a txt file containing the svs filepaths and locations/magnitude from which to create patches on-the-fly during model training. You can alternatively use [our original sample_dataset_30.txt file](https://huggingface.co/SophontAI/OpenMidnight/blob/main/sample_dataset_30.txt), but note you would need to modify that txt to correct its use of absolute filepaths.
 
 ## Training Single GPU (Short Config)
 
@@ -182,9 +188,8 @@ python HEST_evaluation.py
 
 This repository adapts and extends Meta AI's DINOv2 codebase and follows modifications introduced by Kaiko's Midnight work. If you use this repository or models in academic work, please cite their and our work:
 
+Kaplan, D., Grandhi, R. S., Lane, C., Warner, B., Abraham, T. M., & Scotti, P. S. (2025). How to train a state-of-the-art pathology foundation model with $1.6k. *Sophont*. https://sophont.med/blog/openmidnight
+
 Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., ... & Bojanowski, P. (2023). Dinov2: Learning robust visual features without supervision. arXiv preprint arXiv:2304.07193.
 
 Karasikov, M., van Doorn, J., Känzig, N., Erdal Cesur, M., Horlings, H. M., Berke, R., ... & Otálora, S. (2025). Training state-of-the-art pathology foundation models with orders of magnitude less data. In International Conference on Medical Image Computing and Computer-Assisted Intervention (pp. 573-583). Cham: Springer Nature Switzerland.
-
-Kaplan, D., Grandhi, R. S., Lane, C., Warner, B., Abraham, T. M., & Scotti, P. S. (in prep). How to Train a State‑of‑the‑Art Pathology Foundation Model with $1.6k.
-
