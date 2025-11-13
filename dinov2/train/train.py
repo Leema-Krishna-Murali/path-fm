@@ -27,7 +27,7 @@ from dinov2.utils.utils import CosineScheduler
 
 from dinov2.train.ssl_meta_arch import SSLMetaArch
 from datasets import IterableDatasetDict, load_dataset, DownloadConfig
-from PIL import Image
+from PIL import Image, ImageOps
 import torch.utils.data
 
 import pyarrow
@@ -51,9 +51,9 @@ def _build_streaming_dataset(
     dataset_path: str,
     *,
     shuffle_buffer: int,
-    base_seed: int,
-    fragment_prefetch_limit: int = 1,
-    fragment_range_size: int = 128 << 20,
+    base_seed: int = 0,
+    fragment_prefetch_limit: int = 4,
+    fragment_range_size: int = 32 << 20,
     epoch: int = 0,
 ):
     # Get current rank/size at call time (safe under elastic restarts)
@@ -306,100 +306,115 @@ def do_train(cfg, model, resume=False):
         dtype=inputs_dtype,
     )
 
-    # setup data loader (streaming from huggingface)
+    # setup data loader
 
-    dataset_builder = partial(
-        _build_streaming_dataset,
-        dataset_path="medarc/TCGA-12K-parquet",
-        shuffle_buffer=10000,
-        base_seed=42,
-        # Prefetch Arrow fragments to keep I/O busy
-        fragment_prefetch_limit=4,
-        fragment_range_size=(32 << 20),
-    )
+    if cfg.train.streaming_from_hf:
+        dataset_builder = partial(
+            _build_streaming_dataset,
+            dataset_path="medarc/TCGA-12K-parquet",
+            shuffle_buffer=50000,                   
+            base_seed=42, 
+        )
 
-    def decode_and_transform(item):
-        image_file = BytesIO(item["image_bytes"])
-        image = Image.open(image_file)
-        image = image.convert("RGB")
-        transformed = data_transform(image)
-        slide_meta = (item["slide_path"], item["x"], item["y"], item["level"])
-        return (transformed, None), slide_meta
+        def decode_and_transform(item):
+            image = Image.open(BytesIO(item["image_bytes"]))
+            image = ImageOps.exif_transpose(image).convert("RGB")
+            transformed = data_transform(image)
+            slide_meta = (item["slide_path"], item["x"], item["y"], item["level"])
+            return (transformed, None), slide_meta
 
-    class _TransformedStreamingDataset(torch.utils.data.IterableDataset):
-        def __init__(self, dataset_builder, transform, samples_per_epoch=None, reshuffle_every=0):
-            self._dataset_builder = dataset_builder
-            self._transform = transform
-            self._samples_per_epoch = samples_per_epoch
-            self._reshuffle_every = reshuffle_every  # 0 => never
-            self._initialized = False
-            self._epoch_seen = 0
-            self._src_iter = None
+        class _TransformedStreamingDataset(torch.utils.data.IterableDataset):
+            def __init__(self, dataset_builder, transform, samples_per_epoch=None, reshuffle_every=0):
+                self._dataset_builder = dataset_builder
+                self._transform = transform
+                self._samples_per_epoch = samples_per_epoch
+                self._reshuffle_every = reshuffle_every  
+                self._initialized = False
+                self._epoch_seen = 0
+                self._src_iter = None
 
-        def _init_or_reshuffle(self, *, force: bool = False):
-            if force or (not self._initialized) or (
-                self._reshuffle_every and (self._epoch_seen % self._reshuffle_every == 0)
-            ):
-                src = self._dataset_builder(epoch=self._epoch_seen if self._reshuffle_every else 0)
-                worker_info = torch.utils.data.get_worker_info()
-                if worker_info is not None and worker_info.num_workers > 1:
-                    src = src.shard(num_shards=worker_info.num_workers, index=worker_info.id)
-                self._src_iter = iter(src)
-                self._initialized = True
+            def _init_or_reshuffle(self, *, force: bool = False):
+                if force or (not self._initialized) or (
+                    self._reshuffle_every and (self._epoch_seen % self._reshuffle_every == 0)
+                ):
+                    src = self._dataset_builder(epoch=self._epoch_seen if self._reshuffle_every else 0)
+                    worker_info = torch.utils.data.get_worker_info()
+                    if worker_info is not None and worker_info.num_workers > 1:
+                        src = src.shard(num_shards=worker_info.num_workers, index=worker_info.id)
+                    self._src_iter = iter(src)
+                    self._initialized = True
 
-        def __iter__(self):
-            while True:
-                self._init_or_reshuffle()
+            def __iter__(self):
+                while True:
+                    self._init_or_reshuffle()
 
-                # Per-RANK quota
-                rank_quota = self._samples_per_epoch or (1 << 62)
+                    # Per-RANK quota
+                    rank_quota = self._samples_per_epoch or (1 << 62)
 
-                worker_info = torch.utils.data.get_worker_info()
-                num_workers = worker_info.num_workers if worker_info is not None else 1
-                worker_id = worker_info.id if worker_info is not None else 0
+                    worker_info = torch.utils.data.get_worker_info()
+                    num_workers = worker_info.num_workers if worker_info is not None else 1
+                    worker_id = worker_info.id if worker_info is not None else 0
 
-                # Split quota across workers (nearly even split)
-                base = rank_quota // num_workers
-                remainder = rank_quota % num_workers
-                local_quota = base + (1 if worker_id < remainder else 0)
+                    # Split quota across workers (nearly even split)
+                    base = rank_quota // num_workers
+                    remainder = rank_quota % num_workers
+                    local_quota = base + (1 if worker_id < remainder else 0)
 
-                produced = 0
-                while produced < local_quota:
-                    try:
-                        sample = next(self._src_iter)
-                    except StopIteration:
-                        # Refill the iterator; only reshuffle on epoch boundaries
-                        self._init_or_reshuffle(force=True)
-                        continue
-                    yield self._transform(sample)
-                    produced += 1
+                    produced = 0
+                    while produced < local_quota:
+                        try:
+                            sample = next(self._src_iter)
+                        except StopIteration:
+                            # Refill the iterator; only reshuffle on epoch boundaries
+                            self._init_or_reshuffle(force=True)
+                            continue
+                        yield self._transform(sample)
+                        produced += 1
 
-                self._epoch_seen += 1
+                    self._epoch_seen += 1
 
-    # Define explicit per-epoch sample budget per rank to keep ranks in lock-step
-    samples_per_epoch = cfg.train.batch_size_per_gpu * cfg.train.OFFICIAL_EPOCH_LENGTH
-    dataset = _TransformedStreamingDataset(
-        dataset_builder,
-        decode_and_transform,
-        samples_per_epoch=samples_per_epoch,
-        reshuffle_every=0,
-    )
+        # Define explicit per-epoch sample budget per rank to keep ranks in lock-step
+        samples_per_epoch = cfg.train.batch_size_per_gpu * cfg.train.OFFICIAL_EPOCH_LENGTH
+        dataset = _TransformedStreamingDataset(
+            dataset_builder,
+            decode_and_transform,
+            samples_per_epoch=samples_per_epoch,
+        )
 
-    def _worker_init(_):
-        torch.set_num_threads(1)
-        os.environ.setdefault("OMP_NUM_THREADS", "1")
+        def _worker_init(_):
+            torch.set_num_threads(1)
+            os.environ.setdefault("OMP_NUM_THREADS", "1")
 
-    data_loader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=cfg.train.batch_size_per_gpu,
-        num_workers=cfg.train.num_workers,
-        drop_last=True,
-        pin_memory=True,
-        persistent_workers=True,
-        collate_fn=collate_fn,
-        prefetch_factor=4,
-        worker_init_fn=_worker_init,
-    )
+        data_loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=cfg.train.batch_size_per_gpu,
+            num_workers=cfg.train.num_workers,
+            drop_last=True,
+            pin_memory=True,
+            persistent_workers=True,
+            collate_fn=collate_fn,
+            prefetch_factor=4,
+            worker_init_fn=_worker_init,
+        )
+    else:
+        from dinov2.data import SamplerType, make_data_loader, make_dataset
+        dataset = make_dataset(
+            dataset_str="pathology:root=/data/TCGA/",
+            transform=data_transform,
+            target_transform=lambda _: (),
+        )
+        sampler_type = SamplerType.SHARDED_INFINITE
+        data_loader = make_data_loader(
+            dataset=dataset,
+            batch_size=cfg.train.batch_size_per_gpu,
+            num_workers=cfg.train.num_workers,
+            shuffle=True,
+            seed=0,
+            sampler_type=sampler_type,
+            sampler_advance=0,  # TODO(qas): fix this -- start_iter * cfg.train.batch_size_per_gpu,
+            drop_last=True,
+            collate_fn=collate_fn,
+        )
 
     # training loop
 
@@ -546,15 +561,6 @@ def main(args):
         print(model_pretrained.pos_embed.shape) #1, 1360, 384. We lose pos embed because it was 518
         print(model.student.backbone.pos_embed.shape) #1, 257, 384
 
-        # Interpolate pos embed (only has an effect if you are training smaller model size than vitG)
-        # note: the below seems to be doing 1d interpolation, but you need 2d interp
-        # https://github.com/huggingface/pytorch-image-models/blob/47c18f4b6419d34ada6e5deba2463727f3b219f2/timm/layers/pos_embed.py#L47-L49
-        source = model_pretrained.pos_embed.transpose(1, 2)
-        size = model.student.backbone.pos_embed.shape[1]
-        interpolated = torch.nn.functional.interpolate(source, size=size, mode='linear', align_corners=False)
-        interpolated_embeddings = interpolated.transpose(1, 2)
-        model.student.pos_embed = interpolated_embeddings
-
         # We need to make sure we grab *all* of the keys.
         # For each block, copy weights over.
         layers = []
@@ -611,4 +617,3 @@ if __name__ == "__main__":
         raise ValueError("config file path must be provided")
     CONFIG_FILE_PATH = os.path.abspath(args.config_file)
     main(args)
-
