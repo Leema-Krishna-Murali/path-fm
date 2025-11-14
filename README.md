@@ -1,14 +1,16 @@
-# OpenMidnight
+<center> <h1> OpenMidnight </h1> </center>
 
-Fully open-source and improved replication of Kaiko.AI's CPath foundation model [Midnight](https://arxiv.org/abs/2504.05186v1).
+Fully open-source and improved replication of Kaiko.AI's pathology foundation model <a href="https://arxiv.org/abs/2504.05186v1">Midnight</a>.
 
-**[SophontAI](https://sophontai.com/)** · **[MedARC](https://medarc.ai)**
+**[Sophont](https://sophont.med/)** · **[MedARC](https://medarc.ai)**
 
 [![Read the OpenMidnight blog](https://img.shields.io/badge/Blog-Training%20SOTA%20Pathology%20Foundation%20Model%20with%20%241.6k-111827?style=for-the-badge&logo=read.cv&logoColor=white)](https://sophont.med/blog/openmidnight)
 
 [![Collaborate with us on Discord](https://img.shields.io/badge/Discord-Collaborate%20with%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/tVR4TWnRM9)
 
 This is a publicly developed, open-source project by [MedARC](https://www.medarc.ai/). If you are interested in helping out, [join our Discord server](https://discord.gg/tVR4TWnRM9) and introduce yourself in our `#path-fm` channel.
+
+<center><img width="735" height="400" alt="2PJpVl2k51pfjFg2Vs-oS" src="https://github.com/user-attachments/assets/fd00a9f5-3248-46ed-883a-f423e54ac2b6" /></center>
 
 ## Features
 - Trains faster with improved average benchmarking performance compared to the original Midnight-12K model (~3 days to train using 1×8×H100)
