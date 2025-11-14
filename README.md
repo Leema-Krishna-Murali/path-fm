@@ -1,16 +1,15 @@
-<center> <h1> OpenMidnight </h1> </center>
+<h1> OpenMidnight </h1>
 
-Fully open-source and improved replication of Kaiko.AI's pathology foundation model <a href="https://arxiv.org/abs/2504.05186v1">Midnight</a>.
-
-**[Sophont](https://sophont.med/)** · **[MedARC](https://medarc.ai)**
-
-[![Read the OpenMidnight blog](https://img.shields.io/badge/Blog-Training%20SOTA%20Pathology%20Foundation%20Model%20with%20%241.6k-111827?style=for-the-badge&logo=read.cv&logoColor=white)](https://sophont.med/blog/openmidnight)
-
-[![Collaborate with us on Discord](https://img.shields.io/badge/Discord-Collaborate%20with%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/tVR4TWnRM9)
+<p align="center"><img width="735" height="400" alt="2PJpVl2k51pfjFg2Vs-oS" src="https://github.com/user-attachments/assets/fd00a9f5-3248-46ed-883a-f423e54ac2b6" /></p>
+<p align="center">Fully open-source and improved replication of Kaiko.AI's pathology foundation model <a href="https://arxiv.org/abs/2504.05186v1">Midnight</a>.</p>
+<div id="badges" align="center">
+  <a href="https://sophont.med/blog/openmidnight"><img src="https://img.shields.io/badge/Blog-Training%20SOTA%20Pathology%20Foundation%20Model%20with%20%241.6k-111827?style=for-the-badge&logo=read.cv&logoColor=white" /> </a>
+  <a href="https://discord.gg/tVR4TWnRM9"><img src="https://img.shields.io/badge/Discord-Collaborate%20with%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white" /></a>     
+</div>
+<p align="center"> <a href="https://sophont.med">Sophont</a> · <a href="https://medarc.ai">MedARC</a> </p>
 
 This is a publicly developed, open-source project by [MedARC](https://www.medarc.ai/). If you are interested in helping out, [join our Discord server](https://discord.gg/tVR4TWnRM9) and introduce yourself in our `#path-fm` channel.
 
-<center><img width="735" height="400" alt="2PJpVl2k51pfjFg2Vs-oS" src="https://github.com/user-attachments/assets/fd00a9f5-3248-46ed-883a-f423e54ac2b6" /></center>
 
 ## Features
 - Trains faster with improved average benchmarking performance compared to the original Midnight-12K model (~3 days to train using 1×8×H100)
@@ -190,8 +189,8 @@ python HEST_evaluation.py
 
 This repository adapts and extends Meta AI's DINOv2 codebase and follows modifications introduced by Kaiko's Midnight work. If you use this repository or models in academic work, please cite their and our work:
 
-Kaplan, D., Grandhi, R. S., Lane, C., Warner, B., Abraham, T. M., & Scotti, P. S. (2025). How to train a state-of-the-art pathology foundation model with $1.6k. *Sophont*. https://sophont.med/blog/openmidnight
+Kaplan, D., Grandhi, R. S., Lane, C., Warner, B., Abraham, T. M., & Scotti, P. S. (2025). How to train a state-of-the-art pathology foundation model with $1.6k. Sophont. https://sophont.med/blog/openmidnight
 
-Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., ... & Bojanowski, P. (2023). Dinov2: Learning robust visual features without supervision. arXiv preprint arXiv:2304.07193.
+Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., ... & Bojanowski, P. (2023). DINOv2: Learning robust visual features without supervision. arXiv preprint arXiv:2304.07193.
 
 Karasikov, M., van Doorn, J., Känzig, N., Erdal Cesur, M., Horlings, H. M., Berke, R., ... & Otálora, S. (2025). Training state-of-the-art pathology foundation models with orders of magnitude less data. In International Conference on Medical Image Computing and Computer-Assisted Intervention (pp. 573-583). Cham: Springer Nature Switzerland.
