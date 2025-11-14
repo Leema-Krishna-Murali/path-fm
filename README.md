@@ -191,6 +191,39 @@ This repository adapts and extends Meta AI's DINOv2 codebase and follows modific
 
 Kaplan, D., Grandhi, R. S., Lane, C., Warner, B., Abraham, T. M., & Scotti, P. S. (2025). How to train a state-of-the-art pathology foundation model with $1.6k. Sophont. https://sophont.med/blog/openmidnight
 
-Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., ... & Bojanowski, P. (2023). DINOv2: Learning robust visual features without supervision. arXiv preprint arXiv:2304.07193.
+```
+@article{kaplan2025openmidnight,
+            author = {Kaplan, Daniel and Grandhi, Ratna Sagari and Lane, Connor and Warner, Benjamin and Abraham, Tanishq Mathew and Scotti, Paul S.},
+            title = {How to Train a State-of-the-Art Pathology Foundation Model with \$1.6k},
+            year = {2025},
+            url = {https://sophont.med/blog/openmidnight},
+          }
+```
 
 Karasikov, M., van Doorn, J., Känzig, N., Erdal Cesur, M., Horlings, H. M., Berke, R., ... & Otálora, S. (2025). Training state-of-the-art pathology foundation models with orders of magnitude less data. In International Conference on Medical Image Computing and Computer-Assisted Intervention (pp. 573-583). Cham: Springer Nature Switzerland.
+
+```
+@inproceedings{karasikov2025training,
+  title={Training state-of-the-art pathology foundation models with orders of magnitude less data},
+  author={Karasikov, Mikhail and van Doorn, Joost and K{\"a}nzig, Nicolas and Erdal Cesur, Melis and Horlings, Hugo Mark and Berke, Robert and Tang, Fei and Ot{\'a}lora, Sebastian},
+  booktitle={International Conference on Medical Image Computing and Computer-Assisted Intervention},
+  pages={573—583},
+  year={2025},
+  organization={Springer}
+}
+```
+
+Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., ... & Bojanowski, P. (2023). DINOv2: Learning robust visual features without supervision. arXiv preprint arXiv:2304.07193.
+
+```
+@article{oquab2023dinov2,
+            title={DINOv2: Learning Robust Visual Features without Supervision}, 
+            author={Maxime Oquab and Timothée Darcet and Théo Moutakanni and Huy Vo and Marc Szafraniec and Vasil Khalidov and Pierre Fernandez and Daniel Haziza and Francisco Massa and Alaaeldin El-Nouby and Mahmoud Assran and Nicolas Ballas and Wojciech Galuba and Russell Howes and Po-Yao Huang and Shang-Wen Li and Ishan Misra and Michael Rabbat and Vasu Sharma and Gabriel Synnaeve and Hu Xu and Hervé Jegou and Julien Mairal and Patrick Labatut and Armand Joulin and Piotr Bojanowski},
+            year={2024},
+            eprint={2304.07193},
+            archivePrefix={arXiv},
+            primaryClass={cs.CV},
+            url={https://arxiv.org/abs/2304.07193}, 
+}
+```
+
