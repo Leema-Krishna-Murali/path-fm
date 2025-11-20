@@ -125,7 +125,7 @@ Below is a high‑level overview of our training recipe, with particular attenti
 
 ## eva Benchmarks
 
-First ensure you have a checkpoint ready to be evaluated. Place your .pth file for your teacher checkpoint in the /checkpoints folder. You can download our pretrained checkpoint here: *insert URL here*
+First ensure you have a checkpoint ready to be evaluated. Place your .pth file for your teacher checkpoint in the /checkpoints folder. You can download our pretrained checkpoint here: https://huggingface.co/SophontAI/OpenMidnight/blob/main/teacher_checkpoint.pth
 
 Then, `cd` into the same `openmidnight` folder cloned from our Installation steps and clone our modified GitHub repo forked from the original [kaiko-eva](https://github.com/kaiko-ai/eva):
 
