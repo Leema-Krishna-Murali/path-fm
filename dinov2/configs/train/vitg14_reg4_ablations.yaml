@@ -10,12 +10,13 @@ ibot:
   head_n_prototypes: 131072
 train:
   streaming_from_hf: False
-  sample_list_path: /data/TCGA/sample_dataset_30.txt
-  batch_size_per_gpu: 48
+  sample_list_path: /data/TCGA/sample_dataset_ablation.txt
+  batch_size_per_gpu: 12 #48
   centering: sinkhorn_knopp
   use_pretrained: True
   OFFICIAL_EPOCH_LENGTH: 1250
   num_workers: 4 # should be 4 or less if streaming from HF to avoid too many open files error
+  skip_checkpointer: true
 student:
   arch: vit_giant2
   patch_size: 14
@@ -26,13 +27,14 @@ student:
 teacher:
   momentum_teacher: 0.994
 optim:
-  epochs: 8000 
-  early_stop: 200 # we want to early stop at 200 epochs to replicate SOTA ckpt
+  epochs: 400 
+  early_stop: 10
   weight_decay_end: 0.2
-  base_lr: 2.0e-04  # learning rate for a batch size of 1024 (swapped from 3.5e-4 to 2.0e-4)
+  base_lr: 4.3e-05  # learning rate for a batch size of 1024 (swapped from 3.5e-4 to 2.0e-4)
+  # base_lr * sqrt(global_batch/1024) --> 2.0e-04 * 0.2165 ≈ 4.3e-05
   warmup_epochs: 10
   layerwise_decay: 1.0
 crops:
   local_crops_size: 98
 evaluation:
-  eval_period_iterations: 12500 # save checkpoint every 10 epochs
+  eval_period_iterations: 500 # save checkpoint every x iterations
