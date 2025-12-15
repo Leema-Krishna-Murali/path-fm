@@ -180,6 +180,107 @@ def apply_optim_scheduler(optimizer, lr, wd, last_layer_lr):
 
 _FULL_STATE_DICT_CFG = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
 
+_HUB_ARCH_NAMES = {
+    "vit_small": "vits",
+    "vit_base": "vitb",
+    "vit_large": "vitl",
+    "vit_giant2": "vitg",
+}
+
+
+def _resolve_torchhub_name(cfg):
+    hub_arch = _HUB_ARCH_NAMES.get(cfg.student.arch)
+    if hub_arch is None:
+        raise AssertionError(f"Unsupported student arch for pretrained load: {cfg.student.arch}")
+    if cfg.student.patch_size != 14:
+        raise AssertionError("Pretrained torch.hub weights are only defined for patch_size=14")
+    if cfg.student.num_register_tokens not in (0, 4):
+        raise AssertionError("Pretrained weights only support 0 or 4 register tokens")
+    reg_suffix = "_reg" if cfg.student.num_register_tokens else ""
+    return f"dinov2_{hub_arch}{cfg.student.patch_size}{reg_suffix}"
+
+
+def _load_pretrained_backbone(cfg, model):
+    def _iter_vit_blocks(backbone):
+        if backbone.chunked_blocks:
+            for chunk in backbone.blocks:
+                for blk in chunk:
+                    if not isinstance(blk, torch.nn.Identity):
+                        yield blk
+        else:
+            for blk in backbone.blocks:
+                yield blk
+
+    def _mlp_kind(block):
+        if hasattr(block.mlp, "fc1"):
+            return "mlp"
+        if hasattr(block.mlp, "w12"):
+            return "swiglu"
+        raise AssertionError("Unsupported FFN block type")
+
+    hub_name = _resolve_torchhub_name(cfg)
+    logger.info("Loading pretrained backbone from torch.hub: %s", hub_name)
+    model_pretrained = torch.hub.load("facebookresearch/dinov2", hub_name)
+    device = next(model.parameters()).device
+    model_pretrained = model_pretrained.to(device)
+    student_backbone = model.student.backbone
+    teacher_backbone = model.teacher.backbone
+
+    with torch.no_grad():
+        if student_backbone.embed_dim != model_pretrained.embed_dim:
+            raise AssertionError("Pretrained embed_dim mismatch")
+        if student_backbone.n_blocks != model_pretrained.n_blocks:
+            raise AssertionError("Pretrained depth mismatch")
+        if student_backbone.num_register_tokens != model_pretrained.num_register_tokens:
+            raise AssertionError("Pretrained register token count mismatch")
+
+        student_backbone.patch_embed.proj.weight.copy_(model_pretrained.patch_embed.proj.weight)
+        student_backbone.patch_embed.proj.bias.copy_(model_pretrained.patch_embed.proj.bias)
+        student_backbone.cls_token.copy_(model_pretrained.cls_token)
+        student_backbone.mask_token.copy_(model_pretrained.mask_token)
+        if student_backbone.num_register_tokens:
+            student_backbone.register_tokens.copy_(model_pretrained.register_tokens)
+
+        pos_embed_pretrained = model_pretrained.pos_embed.detach()
+        n_extra_tokens = 1
+        cls_pos_embed = pos_embed_pretrained[:, :n_extra_tokens]
+        patch_pos_embed = pos_embed_pretrained[:, n_extra_tokens:]
+
+        orig_size = int(patch_pos_embed.shape[1] ** 0.5)
+        patch_pos_embed = patch_pos_embed.reshape(1, orig_size, orig_size, -1).permute(0, 3, 1, 2)
+
+        target_h, target_w = student_backbone.patch_embed.patches_resolution
+        resized_patch_pos_embed = F.interpolate(
+            patch_pos_embed,
+            size=(target_h, target_w),
+            mode="bicubic",
+            align_corners=False,
+            antialias=model_pretrained.interpolate_antialias,
+        )
+        resized_patch_pos_embed = resized_patch_pos_embed.permute(0, 2, 3, 1).reshape(
+            1, target_h * target_w, -1
+        )
+        new_pos_embed = torch.cat((cls_pos_embed, resized_patch_pos_embed), dim=1)
+
+        student_backbone.pos_embed.copy_(new_pos_embed)
+        teacher_backbone.pos_embed.copy_(new_pos_embed)
+
+        student_blocks = list(_iter_vit_blocks(student_backbone))
+        pretrained_blocks = list(_iter_vit_blocks(model_pretrained))
+        if len(student_blocks) != len(pretrained_blocks):
+            raise AssertionError("Pretrained block count mismatch")
+        if student_blocks and _mlp_kind(student_blocks[0]) != _mlp_kind(pretrained_blocks[0]):
+            raise AssertionError(
+                f"FFN mismatch: cfg.student.ffn_layer builds {_mlp_kind(student_blocks[0])}, "
+                f"but torch.hub {hub_name} uses {_mlp_kind(pretrained_blocks[0])}"
+            )
+        for dst, src in zip(student_blocks, pretrained_blocks):
+            dst.load_state_dict(src.state_dict(), strict=True)
+
+        student_backbone.norm.weight.copy_(model_pretrained.norm.weight)
+        student_backbone.norm.bias.copy_(model_pretrained.norm.bias)
+
+
 def do_test(cfg, model, iteration): # save teacher checkpoint (used for eval only)
     # All ranks participate in FSDP state_dict() even with rank0_only=True
     is_main = distributed.is_main_process()
@@ -779,86 +880,7 @@ def main(args):
     model = SSLMetaArch(cfg).to(torch.device("cuda"))
     #Load model here from pretrained.
     if cfg.train.use_pretrained:
-
-        if cfg.student.arch == "vit_giant2":
-            print("loading pretrained DinoV2-giant") 
-            model_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitg14_reg')
-            model_pretrained = model_pretrained.to(torch.device("cuda"))
-            model.student.backbone.patch_embed.proj.weight = model_pretrained.patch_embed.proj.weight
-            model.student.backbone.patch_embed.proj.bias = model_pretrained.patch_embed.proj.bias
-            model.student.backbone.cls_token = model_pretrained.cls_token
-            model.student.backbone.register_tokens = model_pretrained.register_tokens
-            model.student.backbone.mask_token = model_pretrained.mask_token
-        else:
-            AssertionError("only giant pretrained is supported currently")
-
-        print(model.state_dict().keys())
-        print(model_pretrained.state_dict().keys())
-        print(model_pretrained.pos_embed.shape) #1, 1360, 384. We lose pos embed because it was 518
-        print(model.student.backbone.pos_embed.shape) #1, 257, 384
-
-        # Interpolate pretrained positional embeddings to the current patch grid
-        with torch.no_grad():
-            pos_embed_pretrained = model_pretrained.pos_embed.detach()
-            n_extra_tokens = 1  # cls token
-            cls_pos_embed = pos_embed_pretrained[:, :n_extra_tokens]
-            patch_pos_embed = pos_embed_pretrained[:, n_extra_tokens:]
-
-            # Original grid size (assumes square)
-            orig_size = int(patch_pos_embed.shape[1] ** 0.5)
-            patch_pos_embed = patch_pos_embed.reshape(1, orig_size, orig_size, -1).permute(0, 3, 1, 2)
-
-            # Target grid size from the current model
-            target_h, target_w = model.student.backbone.patch_embed.patches_resolution
-            resized_patch_pos_embed = F.interpolate(
-                patch_pos_embed,
-                size=(target_h, target_w),
-                mode="bicubic",
-                align_corners=False,
-                antialias=getattr(model_pretrained, "interpolate_antialias", False),
-            )
-            resized_patch_pos_embed = resized_patch_pos_embed.permute(0, 2, 3, 1).reshape(
-                1, target_h * target_w, -1
-            )
-            new_pos_embed = torch.cat((cls_pos_embed, resized_patch_pos_embed), dim=1)
-
-            model.student.backbone.pos_embed = torch.nn.Parameter(new_pos_embed.clone())
-            model.teacher.backbone.pos_embed = torch.nn.Parameter(new_pos_embed.clone())
-
-        # We need to make sure we grab *all* of the keys.
-        # For each block, copy weights over.
-        layers = []
-        for layer in model_pretrained.blocks:
-            layers.append(layer)
-        i = 0
-        for layer in model.student.backbone.blocks:
-            for sublayer in layer:
-                if type(sublayer) != torch.nn.Identity:
-                    current = layers.pop(0)
-                    sublayer.norm1.weight = current.norm1.weight
-                    sublayer.norm1.bias = current.norm1.bias
-                    sublayer.attn.qkv.weight = current.attn.qkv.weight
-                    sublayer.attn.qkv.bias =  current.attn.qkv.bias
-                    sublayer.attn.proj.weight = current.attn.proj.weight
-                    sublayer.attn.proj.bias = current.attn.proj.bias
-                    sublayer.norm2.weight = current.norm2.weight
-                    sublayer.norm2.bias = current.norm2.bias
-                    try:
-                        sublayer.mlp.fc1.weight = current.mlp.fc1.weight
-                        sublayer.mlp.fc2.weight = current.mlp.fc2.weight
-                        sublayer.mlp.fc1.bias = current.mlp.fc1.bias
-                        sublayer.mlp.fc2.bias = current.mlp.fc2.bias
-                    except:
-                        sublayer.mlp.w12.weight = current.mlp.w12.weight
-                        sublayer.mlp.w12.bias = current.mlp.w12.bias
-                        sublayer.mlp.w3.weight = current.mlp.w3.weight
-                        sublayer.mlp.w3.bias = current.mlp.w3.bias
-                    sublayer.ls1.gamma = current.ls1.gamma
-                    sublayer.ls2.gamma = current.ls2.gamma
-
-
-        model.student.backbone.norm.weight = model_pretrained.norm.weight
-        model.student.backbone.norm.bias = model_pretrained.norm.bias 
+        _load_pretrained_backbone(cfg, model)
 
     model.prepare_for_distributed_training()
     logger.info("Model:\n{}".format(model))
