@@ -1,14 +1,15 @@
-# OpenMidnight
+<h1> OpenMidnight </h1>
 
-Fully open-source and improved replication of Kaiko.AI's CPath foundation model [Midnight](https://arxiv.org/abs/2504.05186v1).
-
-**[SophontAI](https://sophontai.com/)** · **[MedARC](https://medarc.ai)**
-
-[![Read the OpenMidnight blog](https://img.shields.io/badge/Blog-Training%20SOTA%20Pathology%20Foundation%20Model%20with%20%241.6k-111827?style=for-the-badge&logo=read.cv&logoColor=white)](https://sophont.med/blog/openmidnight)
-
-[![Collaborate with us on Discord](https://img.shields.io/badge/Discord-Collaborate%20with%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/tVR4TWnRM9)
+<p align="center"><img width="735" height="400" alt="2PJpVl2k51pfjFg2Vs-oS" src="https://github.com/user-attachments/assets/fd00a9f5-3248-46ed-883a-f423e54ac2b6" /></p>
+<p align="center">Fully open-source and improved replication of Kaiko.AI's pathology foundation model <a href="https://arxiv.org/abs/2504.05186v1">Midnight</a>.</p>
+<div id="badges" align="center">
+  <a href="https://sophont.med/blog/openmidnight"><img src="https://img.shields.io/badge/Blog-Training%20SOTA%20Pathology%20Foundation%20Model%20with%20%241.6k-111827?style=for-the-badge&logo=read.cv&logoColor=white" /> </a>
+  <a href="https://discord.gg/tVR4TWnRM9"><img src="https://img.shields.io/badge/Discord-Collaborate%20with%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white" /></a>     
+</div>
+<p align="center"> <a href="https://sophont.med">Sophont</a> · <a href="https://medarc.ai">MedARC</a> </p>
 
 This is a publicly developed, open-source project by [MedARC](https://www.medarc.ai/). If you are interested in helping out, [join our Discord server](https://discord.gg/tVR4TWnRM9) and introduce yourself in our `#path-fm` channel.
+
 
 ## Features
 - Trains faster with improved average benchmarking performance compared to the original Midnight-12K model (~3 days to train using 1×8×H100)
@@ -120,7 +121,7 @@ Below is a high‑level overview of our training recipe, with particular attenti
 
 ## eva Benchmarks
 
-First ensure you have a checkpoint ready to be evaluated. Place your .pth file for your teacher checkpoint in the /checkpoints folder. You can download our pretrained checkpoint here: *insert URL here*
+First ensure you have a checkpoint ready to be evaluated. Place your .pth file for your teacher checkpoint in the /checkpoints folder. You can download our pretrained checkpoint here: https://huggingface.co/SophontAI/OpenMidnight/blob/main/teacher_checkpoint.pth
 
 Then, `cd` into the same `openmidnight` folder cloned from our Installation steps and clone our modified GitHub repo forked from the original [kaiko-eva](https://github.com/kaiko-ai/eva):
 
@@ -184,8 +185,41 @@ python HEST_evaluation.py
 
 This repository adapts and extends Meta AI's DINOv2 codebase and follows modifications introduced by Kaiko's Midnight work. If you use this repository or models in academic work, please cite their and our work:
 
-Kaplan, D., Grandhi, R. S., Lane, C., Warner, B., Abraham, T. M., & Scotti, P. S. (2025). How to train a state-of-the-art pathology foundation model with $1.6k. *Sophont*. https://sophont.med/blog/openmidnight
+Kaplan, D., Grandhi, R. S., Lane, C., Warner, B., Abraham, T. M., & Scotti, P. S. (2025). How to train a state-of-the-art pathology foundation model with $1.6k. Sophont. https://sophont.med/blog/openmidnight
 
-Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., ... & Bojanowski, P. (2023). Dinov2: Learning robust visual features without supervision. arXiv preprint arXiv:2304.07193.
+```
+@article{kaplan2025openmidnight,
+            author = {Kaplan, Daniel and Grandhi, Ratna Sagari and Lane, Connor and Warner, Benjamin and Abraham, Tanishq Mathew and Scotti, Paul S.},
+            title = {How to Train a State-of-the-Art Pathology Foundation Model with \$1.6k},
+            year = {2025},
+            url = {https://sophont.med/blog/openmidnight},
+          }
+```
 
 Karasikov, M., van Doorn, J., Känzig, N., Erdal Cesur, M., Horlings, H. M., Berke, R., ... & Otálora, S. (2025). Training state-of-the-art pathology foundation models with orders of magnitude less data. In International Conference on Medical Image Computing and Computer-Assisted Intervention (pp. 573-583). Cham: Springer Nature Switzerland.
+
+```
+@inproceedings{karasikov2025training,
+  title={Training state-of-the-art pathology foundation models with orders of magnitude less data},
+  author={Karasikov, Mikhail and van Doorn, Joost and K{\"a}nzig, Nicolas and Erdal Cesur, Melis and Horlings, Hugo Mark and Berke, Robert and Tang, Fei and Ot{\'a}lora, Sebastian},
+  booktitle={International Conference on Medical Image Computing and Computer-Assisted Intervention},
+  pages={573—583},
+  year={2025},
+  organization={Springer}
+}
+```
+
+Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., ... & Bojanowski, P. (2023). DINOv2: Learning robust visual features without supervision. arXiv preprint arXiv:2304.07193.
+
+```
+@article{oquab2023dinov2,
+            title={DINOv2: Learning Robust Visual Features without Supervision}, 
+            author={Maxime Oquab and Timothée Darcet and Théo Moutakanni and Huy Vo and Marc Szafraniec and Vasil Khalidov and Pierre Fernandez and Daniel Haziza and Francisco Massa and Alaaeldin El-Nouby and Mahmoud Assran and Nicolas Ballas and Wojciech Galuba and Russell Howes and Po-Yao Huang and Shang-Wen Li and Ishan Misra and Michael Rabbat and Vasu Sharma and Gabriel Synnaeve and Hu Xu and Hervé Jegou and Julien Mairal and Patrick Labatut and Armand Joulin and Piotr Bojanowski},
+            year={2024},
+            eprint={2304.07193},
+            archivePrefix={arXiv},
+            primaryClass={cs.CV},
+            url={https://arxiv.org/abs/2304.07193}, 
+}
+```
+
