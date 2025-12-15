@@ -43,3 +43,4 @@ crops:
   local_crops_size: 98
 evaluation:
   eval_period_iterations: 12500 # save checkpoint every 10 epochs
+  bach_root: /data/eva-data/bach

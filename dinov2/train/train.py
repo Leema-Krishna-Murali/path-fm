@@ -325,7 +325,7 @@ def do_test(cfg, model, iteration): # save teacher checkpoint (used for eval onl
         return
 
     repo_root = Path(__file__).resolve().parents[2]
-    bach_root = "/data/eva-data/bach"
+    bach_root = str(cfg.evaluation.bach_root)
     if not os.path.isdir(bach_root):
         logger.info("Skipping BACH eval; dataset path missing: %s", bach_root)
         return

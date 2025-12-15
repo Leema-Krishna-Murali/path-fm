@@ -117,3 +117,4 @@ crops:
   local_crops_size: 96
 evaluation:
   eval_period_iterations: 12500
+  bach_root: /data/eva-data/bach
