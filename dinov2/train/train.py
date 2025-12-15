@@ -544,7 +544,7 @@ def do_train(cfg, model, resume=False):
     if cfg.train.streaming_from_hf:
         dataset_builder = partial(
             _build_streaming_dataset,
-            dataset_path="medarc/TCGA-12K-parquet",
+            dataset_path=str(cfg.train.streaming_dataset_path),
             shuffle_buffer=50000,                   
             base_seed=42, 
         )
