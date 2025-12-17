@@ -52,6 +52,14 @@ torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False 
 logger = logging.getLogger("dinov2")
 import wandb
 
+RUN_SCRIPT = os.environ.get("DINOV2_RUN_SCRIPT", "")
+USE_ABLATION_AUG = RUN_SCRIPT.endswith("run_ablation.sh")
+if USE_ABLATION_AUG:
+    from dinov2.data.augmentations_ablation import DataAugmentationDINO as DataAugmentationDINO
+    AUGMENTATION_FILE = Path(__file__).resolve().parents[1] / "data" / "augmentations_ablation.py"
+else:
+    AUGMENTATION_FILE = Path(__file__).resolve().parents[1] / "data" / "augmentations.py"
+
 def _build_streaming_dataset(
     dataset_path: str,
     *,
@@ -588,7 +596,7 @@ def do_train(cfg, model, resume=False):
         repo_root = Path(__file__).resolve().parents[2]
         artifact = wandb.Artifact(name=f"run-source-{run.id}", type="code")
         artifact.add_file(str(Path(__file__).resolve()))
-
+        artifact.add_file(str(AUGMENTATION_FILE))
         artifact.add_file(str(os.environ.get("DINOV2_RUN_SCRIPT")))
         artifact.add_file(str(Path(CONFIG_FILE_PATH)))
         run.log_artifact(artifact)
