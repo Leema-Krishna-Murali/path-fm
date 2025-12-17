@@ -41,7 +41,7 @@ optim:
   epochs: 2000 
   early_stop: 50
   weight_decay_end: 0.2
-  base_lr: 2.0e-4
+  base_lr: 8.0e-4
   warmup_epochs: 3
   layerwise_decay: 1.0
   freeze_last_layer_epochs: 1
