@@ -227,8 +227,24 @@ def _load_pretrained_backbone(cfg, model):
         raise AssertionError("Unsupported FFN block type")
 
     hub_name = _resolve_torchhub_name(cfg)
-    logger.info("Loading pretrained backbone from torch.hub: %s", hub_name)
-    model_pretrained = torch.hub.load("facebookresearch/dinov2", hub_name)
+    # NOTE: Avoid `torch.hub.load("facebookresearch/dinov2", ...)` here.
+    # The upstream hubconf uses absolute imports like `from dinov2.hub...` which can
+    # accidentally resolve to *this* repo's `dinov2` package (name collision) and fail.
+    #
+    # We already vendor the official DINOv2 hub constructors in `dinov2/hub/backbones.py`,
+    # which download weights via `load_state_dict_from_url` and do not require importing
+    # the upstream GitHub repository at runtime.
+    logger.info("Loading pretrained backbone using local dinov2.hub.backbones: %s", hub_name)
+    from dinov2.hub import backbones as hub_backbones
+
+    try:
+        backbone_ctor = getattr(hub_backbones, hub_name)
+    except AttributeError as e:
+        raise AssertionError(
+            f"Unsupported torchhub name '{hub_name}'. Expected a constructor in dinov2.hub.backbones."
+        ) from e
+
+    model_pretrained = backbone_ctor(pretrained=True)
     device = next(model.parameters()).device
     model_pretrained = model_pretrained.to(device)
     student_backbone = model.student.backbone
